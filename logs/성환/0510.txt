@@ -1,0 +1,3 @@
+1. main함수 위주로 살펴보기
+2. sanity_check.py와 sonnet_generation.py 읽어보며 주석 달기
+3. 이 코드를 완전히 익힌 후, 추후 프레임워크로 활용할 수 있을 것으로 기대

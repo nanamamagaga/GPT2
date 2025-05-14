@@ -49,7 +49,7 @@ class SonnetGPT(nn.Module):
     super().__init__()
     self.gpt = GPT2Model.from_pretrained(model=args.model_size, d=args.d, l=args.l, num_heads=args.num_heads)
     self.tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
-    self.tokenizer.pad_token = self.tokenizer.eos_token
+    self.tokenizer.pad_token = self.tokenizer.eos_token  # eos_token = "End Of Sequence" 토큰
 
     # 기본적으로, 전체 모델을 fine-tuning한다. TODO: 이것은 좋은 생각이 아닌 것 같다.
     for param in self.gpt.parameters():
@@ -77,7 +77,7 @@ class SonnetGPT(nn.Module):
         여러 시퀀스를 생성하고 beam search를 통해 최적의 시퀀스를 선택하는 것도 좋은 한 가지 방법이다.
         Top-k 샘플링 역시 또 다른 방법이며, 그 외에도 많은 접근법이 있다.
     """
-    token_ids = encoding.to(self.get_device())
+    token_ids = encoding.to(self.get_device()) # GPU 사용 중 → token_ids 변수는 GPU VRAM에 저장된다.
     attention_mask = torch.ones(token_ids.shape, dtype=torch.int64).to(self.get_device())
 
 
@@ -132,19 +132,21 @@ def save_model(model, optimizer, args, filepath):
 
 def train(args):
   """Sonnet 데이터셋에서 소넷 생성을 위해 GPT-2 훈련.""" 
-    device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
-  # 데이터, 해당 데이터셋 및 데이터로드 생성하기.
+  device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
+  
+  # 1. 데이터, 해당 데이터셋 및 데이터로드 생성하기.
   sonnet_dataset = SonnetsDataset(args.sonnet_path)
   sonnet_dataloader = DataLoader(sonnet_dataset, shuffle=True, batch_size=args.batch_size,
                                  collate_fn=sonnet_dataset.collate_fn)
 
-  # held-out 데이터셋 만들기: 처음 3 줄만 있다. 나머지를 채우는 것은 여러분 몫이다!
+  # 2. held-out 데이터셋 만들기: 처음 3 줄만 있다. 나머지를 채우는 것은 여러분 몫이다!
   held_out_sonnet_dataset = SonnetsDataset(args.held_out_sonnet_path)
 
   args = add_arguments(args)
   model = SonnetGPT(args)
   model = model.to(device)
 
+  # 3. 본격적인 아키텍쳐
   lr = args.lr
   optimizer = AdamW(model.parameters(), lr=lr)
 
