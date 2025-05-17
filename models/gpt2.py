@@ -47,14 +47,25 @@ class GPT2Model(GPTPreTrainedModel):
     input_shape = input_ids.size()
     seq_length = input_shape[1]
 
-    inputs_embeds = None
+    
 
-    ### 완성시켜야 할 빈 코드 블록
-    raise NotImplementedError
+    
+    
+  
+    # 단어 임베딩
+    inputs_embeds = self.word_embedding(input_ids)
+
+    # 위치 임베딩 (디바이스 일치)
+    pos_ids = self.position_ids[:, :seq_length].to(input_ids.device)
+    pos_embeds = self.pos_embedding(pos_ids)
+
+    # 임베딩 합 + 드롭아웃
+    hidden_states = inputs_embeds + pos_embeds
+    hidden_states = self.embed_dropout(hidden_states)
+    return hidden_states
 
 
-    pos_ids = self.position_ids[:, :seq_length]
-    pos_embeds = None
+    
 
     ### TODO: pos_ids를 사용하여 self.pos_embedding에서 위치 임베딩을 가져와 pos_embeds에 저장한다.
     ###       그런 다음, 두 개의 임베딩을 더하고, 드롭아웃을 적용한 뒤 반환한다.
@@ -107,7 +118,10 @@ class GPT2Model(GPTPreTrainedModel):
       return hidden_state(s) * E^T
     """
     ### 완성시켜야 할 빈 코드 블록
-    raise NotImplementedError
+    
+    logits = torch.matmul(hidden_state, self.word_embedding.weight.t())
+    return logits
+
 
 
   @classmethod
@@ -121,32 +135,32 @@ class GPT2Model(GPTPreTrainedModel):
     our_model.pos_embedding.load_state_dict(gpt_model.wpe.state_dict())
 
     for i in range(l):
-      l = our_model.gpt_layers[i]
+      layer = our_model.gpt_layers[i]
       # Q, K, V 가중치를 conv1d에서 3개의 선형 프로젝션으로 재매핑.
-      l.self_attention.query.weight.data = gpt_model.state_dict()[f'h.{i}.attn.c_attn.weight'][:, :d].T
-      l.self_attention.query.bias.data = gpt_model.state_dict()[f'h.{i}.attn.c_attn.bias'][:d]
-      l.self_attention.key.weight.data = gpt_model.state_dict()[f'h.{i}.attn.c_attn.weight'][:, d:d*2].T
-      l.self_attention.key.bias.data = gpt_model.state_dict()[f'h.{i}.attn.c_attn.bias'][d:d*2]
-      l.self_attention.value.weight.data = gpt_model.state_dict()[f'h.{i}.attn.c_attn.weight'][:, d*2:].T
-      l.self_attention.value.bias.data = gpt_model.state_dict()[f'h.{i}.attn.c_attn.bias'][d*2:]
+      layer.self_attention.query.weight.data = gpt_model.state_dict()[f'h.{i}.attn.c_attn.weight'][:, :d].T
+      layer.self_attention.query.bias.data = gpt_model.state_dict()[f'h.{i}.attn.c_attn.bias'][:d]
+      layer.self_attention.key.weight.data = gpt_model.state_dict()[f'h.{i}.attn.c_attn.weight'][:, d:d*2].T
+      layer.self_attention.key.bias.data = gpt_model.state_dict()[f'h.{i}.attn.c_attn.bias'][d:d*2]
+      layer.self_attention.value.weight.data = gpt_model.state_dict()[f'h.{i}.attn.c_attn.weight'][:, d*2:].T
+      layer.self_attention.value.bias.data = gpt_model.state_dict()[f'h.{i}.attn.c_attn.bias'][d*2:]
 
       # MHA의 마지막 dense layer를 재매핑.
-      l.attention_dense.weight.data = gpt_model.state_dict()[f'h.{i}.attn.c_proj.weight'].T
-      l.attention_dense.bias.data = gpt_model.state_dict()[f'h.{i}.attn.c_proj.bias']
+      layer.attention_dense.weight.data = gpt_model.state_dict()[f'h.{i}.attn.c_proj.weight'].T
+      layer.attention_dense.bias.data = gpt_model.state_dict()[f'h.{i}.attn.c_proj.bias']
 
       # Attention layer norm을 재매핑.
-      l.attention_layer_norm.weight.data = gpt_model.state_dict()[f'h.{i}.ln_1.weight']
-      l.attention_layer_norm.bias.data = gpt_model.state_dict()[f'h.{i}.ln_1.bias']
+      layer.attention_layer_norm.weight.data = gpt_model.state_dict()[f'h.{i}.ln_1.weight']
+      layer.attention_layer_norm.bias.data = gpt_model.state_dict()[f'h.{i}.ln_1.bias']
 
       # Post-attention MLP layer들을 재매핑
-      l.interm_dense.weight.data = gpt_model.state_dict()[f'h.{i}.mlp.c_fc.weight'].T
-      l.interm_dense.bias.data = gpt_model.state_dict()[f'h.{i}.mlp.c_fc.bias']
-      l.out_dense.weight.data = gpt_model.state_dict()[f'h.{i}.mlp.c_proj.weight'].T
-      l.out_dense.bias.data = gpt_model.state_dict()[f'h.{i}.mlp.c_proj.bias']
+      layer.interm_dense.weight.data = gpt_model.state_dict()[f'h.{i}.mlp.c_fc.weight'].T
+      layer.interm_dense.bias.data = gpt_model.state_dict()[f'h.{i}.mlp.c_fc.bias']
+      layer.out_dense.weight.data = gpt_model.state_dict()[f'h.{i}.mlp.c_proj.weight'].T
+      layer.out_dense.bias.data = gpt_model.state_dict()[f'h.{i}.mlp.c_proj.bias']
 
       # 두번째 layer norm weights를 재매핑.
-      l.out_layer_norm.weight.data = gpt_model.state_dict()[f'h.{i}.ln_2.weight']
-      l.out_layer_norm.bias.data = gpt_model.state_dict()[f'h.{i}.ln_2.bias']
+      layer.out_layer_norm.weight.data = gpt_model.state_dict()[f'h.{i}.ln_2.weight']
+      layer.out_layer_norm.bias.data = gpt_model.state_dict()[f'h.{i}.ln_2.bias']
 
     # 마지막 layer norm 값들을 재매핑.
     our_model.final_layer_norm.weight.data = gpt_model.state_dict()['ln_f.weight']
