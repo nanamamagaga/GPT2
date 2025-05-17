@@ -42,10 +42,11 @@ class GPT2SentimentClassifier(torch.nn.Module):
 
   def __init__(self, config):
     super(GPT2SentimentClassifier, self).__init__()
-    self.num_labels = config.num_labels
+    self.num_labels = config.num_labels  # 5가 돼야하는데, 코드에 문제가 있어 보임..
     self.gpt = GPT2Model.from_pretrained()
+    self.hidden_dim = 1000
 
-    # 사전학습 모드에서는 GPT 파라미터들을 업데이트할 필요가가 없다.
+    # 사전학습 모드에서는 GPT 파라미터들을 업데이트할 필요가 없다.
     assert config.fine_tune_mode in ["last-linear-layer", "full-model"]
     for param in self.gpt.parameters():
       if config.fine_tune_mode == 'last-linear-layer':
@@ -57,7 +58,9 @@ class GPT2SentimentClassifier(torch.nn.Module):
     TODO: BERT 임베딩의 감정 분류를 위해 필요한 인스턴스 변수를 생성하시오.
     '''
     ### 완성시켜야 할 빈 코드 블록
-    raise NotImplementedError
+    self.classifier_1 = torch.nn.Linear(self.gpt.config.hidden_size, self.hidden_dim)
+    self.relu = torch.nn.ReLU()
+    self.classifier_2 = torch.nn.Linear(self.hidden_dim, self.num_labels)
 
 
   def forward(self, input_ids, attention_mask):
@@ -68,8 +71,19 @@ class GPT2SentimentClassifier(torch.nn.Module):
         힌트: 현재 훈련 반복루프에서 손실 함수로 `F.cross_entropy`를 사용하고 있음을 고려하여
         적절한 반환값이 무엇인지 생각해보시오.
     '''
-    ### 완성시켜야 할 빈 코드 블록
-    raise NotImplementedError
+    '''
+    input_ids: [batch_size, seq_len]
+    attention_mask: [batch_size, seq_len]
+    반환값: [batch_size, num_labels] (logits)
+    '''
+    outputs = self.gpt(input_ids=input_ids, attention_mask=attention_mask)
+    # last_hidden_state = outputs["last_hidden_state"]
+    last_token_hidden = outputs["last_token"]
+    
+    x = self.classifier_1(last_token_hidden)
+    x = self.relu(x)
+    x = self.classifier_2(x)
+    return x
 
 
 class SentimentDataset(Dataset):

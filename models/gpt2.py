@@ -105,6 +105,7 @@ class GPT2Model(GPTPreTrainedModel):
     # 마지막 토큰의 hidden state 구하기.
     last_non_pad_idx = attention_mask.sum(dim=1) - 1  # 마지막 인덱스를 구하려면 1을 뺀다.
     last_token = sequence_output[torch.arange(sequence_output.shape[0]), last_non_pad_idx]
+    # GPT는 [CLS]가 없기 때문에, 마지막 토큰의 hidden state가 그 역할을 대신함
 
     return {'last_hidden_state': sequence_output, 'last_token': last_token}
 
@@ -124,6 +125,23 @@ class GPT2Model(GPTPreTrainedModel):
 
 
 
+  '''
+  일반적인 데코레이터 요약
+  1. input & output: 함수 or 메서드
+  2. input 함수를 감싸는(wrapper) 새로운 함수를 정의함
+  3. 새로운 함수(감싼 함수)를 output해 호출 시 추가 동작이 실행됨
+
+  클래스 데코레이터 3줄 요약
+  1. input: 메서드
+  2. 해당 메서드의 첫 번째 인자는 인스턴스가 아니라 클래스
+  3. 따라서 인스턴스 없이 클래스로만 메서드 호출 가능
+  
+  직접 정의한 데코레이터는 추가 동작을 자유롭게 첨가할 수 있음
+  그러나 그냥 파이썬에 기본적으로 내장된 @classmethod는 추가 동작 없이,
+  첫 번째 인자만 인스턴스가 아닌 클래스로 바꿔줌
+  -> 인스턴스 없이 클래스로만 메서드 호출 가능하게 만들어 줌
+  '''
+
   @classmethod
   def from_pretrained(cls, model='gpt2', d=768, l=12, num_heads=12):
     gpt_model = OpenAIGPT2Model.from_pretrained(model).eval()
@@ -135,6 +153,7 @@ class GPT2Model(GPTPreTrainedModel):
     our_model.pos_embedding.load_state_dict(gpt_model.wpe.state_dict())
 
     for i in range(l):
+
       layer = our_model.gpt_layers[i]
       # Q, K, V 가중치를 conv1d에서 3개의 선형 프로젝션으로 재매핑.
       layer.self_attention.query.weight.data = gpt_model.state_dict()[f'h.{i}.attn.c_attn.weight'][:, :d].T
@@ -162,7 +181,7 @@ class GPT2Model(GPTPreTrainedModel):
       layer.out_layer_norm.weight.data = gpt_model.state_dict()[f'h.{i}.ln_2.weight']
       layer.out_layer_norm.bias.data = gpt_model.state_dict()[f'h.{i}.ln_2.bias']
 
-    # 마지막 layer norm 값들을 재매핑.
+    # 마지막 layer norm 값들을 재매핑. 
     our_model.final_layer_norm.weight.data = gpt_model.state_dict()['ln_f.weight']
     our_model.final_layer_norm.bias.data = gpt_model.state_dict()['ln_f.bias']
 

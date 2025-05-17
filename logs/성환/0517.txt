@@ -1,0 +1,25 @@
+1. gpt2.py를 조금 읽었다. 
+메서드는 embed, encode, forward, hidden_state_to_token, from_pretrained로 총 5가지 였다.
+
+즉, (embed, encode) -> forward -> hidden_state_to_token
+from_pretrained
+이렇게 표현할 수 있다.
+
+2. classifier 완성함
+-> 다만 task 별로 classifier 추가해야 함.
+-> 어차피 큰 변경 사항은 없다고 생각됨, 따라서 GPT2SentimentClassifier가 잘 작동하는 걸 확인하고 난 후에 복붙해도 충분
+
+3. gpt2_layer.py 수정
+gpt2의 메서드에서 from_pretrained의 파라미터 구조가 제시됨
+-> 나는 Pre-LN  방식으로 했는데, pretrained 모델에선 post-LN방식으로 되어 있었음
+-> 따라서 gpt2_layer.py를 post-LN 방식으로 수정
+
+[to do]
+1. 우리는 forward 뒤에 classifier를 붙어야 하고 (왜냐하면 forward는 last_hidden_state를 반환하기 때문)
+classifier의 output을 hidden_state_to_token의 입력으로 넣어야 한다.
+즉, forward -> 'classifier' -> hidden_state_to_token
+
+아, classifier만 있어도 되는 모델은 굳이 hidden_state_to_token 메서드가 필요 없다.
+
+2. LoRA를 추가해야 한다.
+How? 이것만 하면 끝인디..?

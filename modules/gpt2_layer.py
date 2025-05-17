@@ -49,23 +49,22 @@ class GPT2Layer(nn.Module):
       - Feed-Forward layer: hidden states를 추가로 refine하기 위해 변환을 적용한다.
     """
     ## 1. Multi-Head Attention
-    # LayerNorm before attention (Pre-LN 방식)
-    normed_hidden = self.attention_layer_norm(hidden_states)
     # Self-Attention (causal mask 포함)
-    attn_output = self.self_attention(normed_hidden, attention_mask)
+    attn_output = self.self_attention(hidden_states, attention_mask)
     # Residual + projection + dropout
     hidden_states = self.add(hidden_states, attn_output,
                              self.attention_dense, self.attention_dropout)
+    hidden_states = self.attention_layer_norm(hidden_states)  # Post-LN
     
     ## 2. Feed-Forward Network
-    # LayerNorm before FFN
-    normed_hidden = self.out_layer_norm(hidden_states)
-    # FFN: GELU 활성화 포함
-    interm_output = self.interm_af(self.interm_dense(normed_hidden))
+    ffn_output = self.interm_dense(hidden_states)             # c_fc
+    ffn_output = self.interm_af(ffn_output)                   # GELU
+    hidden_states = self.add(
+        hidden_states,
+        ffn_output,
+        self.out_dense,  # c_proj
+        dropout_layer=self.out_dropout
+    )
+    hidden_states = self.out_layer_norm(hidden_states)        # Post-LN
 
-    ## 3. Residual Connection
-    # Residual + projection + dropout
-    hidden_states = self.add(hidden_states, interm_output,
-                             self.out_dense, self.out_dropout)
-    
     return hidden_states
