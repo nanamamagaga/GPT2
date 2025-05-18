@@ -45,6 +45,38 @@ class AdamW(Optimizer):
                 # Access hyperparameters from the `group` dictionary.
                 alpha = group["lr"]
 
+                # 1) state 초기화
+                if len(state) == 0:
+                    state["step"] = 0
+                    state["exp_avg"] = torch.zeros_like(p.data)
+                    state["exp_avg_sq"] = torch.zeros_like(p.data)
+
+                exp_avg, exp_avg_sq = state["exp_avg"], state["exp_avg_sq"]
+                beta1, beta2 = group["betas"]
+
+                # 2) step 증가
+                state["step"] += 1
+                step = state["step"]
+
+                # 3) 1차/2차 모멘트 업데이트
+                exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
+                exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
+
+                # 4) bias correction 계산
+                bias_correction1 = 1 - beta1 ** step
+                bias_correction2 = 1 - beta2 ** step
+
+                # 5) decoupled weight decay
+                if group["weight_decay"] != 0:
+                    p.data.add_(p.data, alpha=-alpha * group["weight_decay"])
+
+                # 6) 파라미터 업데이트 (Adam core)
+                denom = exp_avg_sq.sqrt().div_(math.sqrt(bias_correction2)).add_(group["eps"])
+                step_size = alpha / bias_correction1
+                p.data.addcdiv_(exp_avg, denom, value=-step_size)
+                # ----------------------------------------------------
+
+
                 '''
                 TODO: AdamW 구현을 완성하시오. 
                     위의 state 딕셔너리를 사용하여 상태를 읽고 저장하시오.
@@ -59,6 +91,6 @@ class AdamW(Optimizer):
                         자세한 내용은 기본 프로젝트 안내문을 참조할 것.
                 '''
                 ### 완성시켜야 할 빈 코드 블록
-                raise NotImplementedError
+                
 
         return loss
