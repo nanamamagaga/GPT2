@@ -1,1 +1,2 @@
 0517 작업 시작 - GPT2Model embed 및 hidden_state_to_token 함수 구현 완료
+기존 l변수를 layer로 변경함 
