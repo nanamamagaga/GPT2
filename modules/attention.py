@@ -7,14 +7,14 @@ from einops import rearrange
 class CausalSelfAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.num_attention_heads = config.num_attention_heads
-        self.attention_head_size = config.hidden_size // config.num_attention_heads
-        self.all_head_size       = self.num_attention_heads * self.attention_head_size
+        self.num_attention_heads = config.num_attention_heads   # 12
+        self.attention_head_size = int(config.hidden_size // config.num_attention_heads) # 768/12 -> 64
+        self.all_head_size       = self.num_attention_heads * self.attention_head_size  # 12 * 64 -> 768
 
-        self.query  = nn.Linear(config.hidden_size, self.all_head_size)
-        self.key    = nn.Linear(config.hidden_size, self.all_head_size)
-        self.value  = nn.Linear(config.hidden_size, self.all_head_size)
-        self.dropout = nn.Dropout(config.attention_probs_dropout_prob)
+        self.query  = nn.Linear(config.hidden_size, self.all_head_size) # 768x768
+        self.key    = nn.Linear(config.hidden_size, self.all_head_size) # 768x768
+        self.value  = nn.Linear(config.hidden_size, self.all_head_size) # 768x768
+        self.dropout = nn.Dropout(config.attention_probs_dropout_prob)  # 0.1
 
     def transform(self, x, linear_layer):
         proj = linear_layer(x)                               # [b, t, h*d]
@@ -28,7 +28,7 @@ class CausalSelfAttention(nn.Module):
         attention_mask : [bs, 1, 1, seq_len]  (0 또는 -inf)
         반환: context [bs, seq_len, hidden]
         """
-        dk = self.attention_head_size
+        dk = self.attention_head_size   # 64
         scores = torch.matmul(query, key.transpose(-1, -2)) / math.sqrt(dk)  # [bs,h,t,t]
 
         # causal mask (future positions 차단)
