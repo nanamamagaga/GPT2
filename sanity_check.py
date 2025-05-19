@@ -31,7 +31,9 @@ def test_gpt2(model_size='gpt2'):
   att_mask = att_mask.unsqueeze(-1)
   my_outputs['last_hidden_state'] = my_outputs['last_hidden_state'] * att_mask
   openai_outputs *= att_mask
-
+  diff = torch.abs(my_outputs['last_hidden_state'] - openai_outputs)
+  print("최대 차이:", torch.max(diff).item(),flush=True)
+  print("평균 차이:", torch.mean(diff).item(),flush=True)
   assert torch.allclose(my_outputs['last_hidden_state'], openai_outputs, atol=1e-1, rtol=1e-2)
 
   print("Your GPT2 implementation is correct!")
