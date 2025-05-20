@@ -121,7 +121,7 @@ class GPT2Model(GPTPreTrainedModel):
     """
     ### 완성시켜야 할 빈 코드 블록
     
-    logits = torch.matmul(hidden_state, self.word_embedding.weight.t())
+    logits = torch.matmul(hidden_state, self.word_embedding.weight.t()) # DxV
     return logits
 
 

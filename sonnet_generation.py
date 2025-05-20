@@ -8,6 +8,8 @@ trains your SonnetGPT model and writes the required submission files.
 SonnetGPT 모델을 훈련하고, 필요한 제출용 파일을 작성한다.
 '''
 
+# 차원을 엄밀하게 계산하며 파악하자.
+
 import argparse
 import random
 import torch
@@ -31,6 +33,7 @@ from optimizer import AdamW
 TQDM_DISABLE = False
 
 
+
 # 재현성을 위한 random seed 고정.
 def seed_everything(seed=11711):
   random.seed(seed)
@@ -49,18 +52,32 @@ class SonnetGPT(nn.Module):
     super().__init__()
     self.gpt = GPT2Model.from_pretrained(model=args.model_size, d=args.d, l=args.l, num_heads=args.num_heads)
     self.tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
-    self.tokenizer.pad_token = self.tokenizer.eos_token  # eos_token = "End Of Sequence" 토큰
+    self.tokenizer.pad_token = self.tokenizer.eos_token  # eos_token = "End Of Sequence" 토큰, print(tokenizer.eos_token) -> # </s>
 
     # 기본적으로, 전체 모델을 fine-tuning한다. TODO: 이것은 좋은 생각이 아닌 것 같다.
     for param in self.gpt.parameters():
       param.requires_grad = True
 
-  def forward(self, input_ids, attention_mask):
+  def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
     """
     ParaphraseGPT의 forward pass와 유사하지만, 여기서는 시퀀스의 마지막 토큰뿐만 아니라 시퀀스의 각 토큰에 대한 logit을 생성하려고 한다.
     이를 통해, 마지막 토큰에 대한 다음 토큰의 분포만 학습하는 것이 아니라, 모델은 소네트를 구성하는 자연어 분포를 학습할 수 있다.
     """
-    ### 완성시켜야 할 빈 코드 블록
+    """Return token‑level logits (batch, seq_len, vocab_size)."""
+    # GPT‑2 backbone → hidden states (B, T, D)
+    hidden_states = self.gpt(
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+    )
+    # hidden_states: 임베딩 층으로부터의 출력 [batch_size, seq_len, hidden_size]
+    # vocab_size != hidden_size
+
+    # Language‑model head(B, T, D) → logits (B, T, V)
+    logits = self.gpt.hidden_state_to_token(hidden_states['last_hidden_state']) # DxV
+    return logits
+
+  
+  def fine_tuning(self):
     raise NotImplementedError
 
 

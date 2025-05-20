@@ -42,7 +42,8 @@ class GPT2SentimentClassifier(torch.nn.Module):
 
   def __init__(self, config):
     super(GPT2SentimentClassifier, self).__init__()
-    self.num_labels = config.num_labels  # 5가 돼야하는데, 코드에 문제가 있어 보임..
+    # self.num_labels = config.num_labels  # 5가 돼야하는데, 코드에 문제가 있어 보임..
+    self.num_labels = 5 # 하드코딩
     self.gpt = GPT2Model.from_pretrained()
     self.hidden_dim = 1000
 
