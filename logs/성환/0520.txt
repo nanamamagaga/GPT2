@@ -1,0 +1,8 @@
+1. part1, part2 중 sonnet_gen_ 완료
+2. 이제 fine tuning만 하면 됨
+
+우선 sonnet_gen_의 파인튜닝부터 해야겠다.
+sentiment analysis랑 classifier는 비슷해 보임..
+
+한 일
+1. 로라 클래스 만듬 <- 설명에 대해 워드로 작성

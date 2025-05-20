@@ -27,8 +27,8 @@ from datasets import (
   SonnetsDataset,
 )
 from models.gpt2 import GPT2Model
-
 from optimizer import AdamW
+import LoRA_adapter
 
 TQDM_DISABLE = False
 
@@ -43,6 +43,7 @@ def seed_everything(seed=11711):
   torch.cuda.manual_seed_all(seed)
   torch.backends.cudnn.benchmark = False
   torch.backends.cudnn.deterministic = True
+
 
 
 class SonnetGPT(nn.Module):
@@ -77,8 +78,40 @@ class SonnetGPT(nn.Module):
     return logits
 
   
-  def fine_tuning(self):
-    raise NotImplementedError
+  def convert_to_lora(self):
+    """
+    기존 GPT2의 Q/K/V 프로젝션 레이어를 LoRALinear로 교체하여 파라미터 효율화 및 학습 속도 개선을 가능하게 한다.
+    """
+
+    l = 12       # number of layers
+    d = 768      # hidden dim
+
+    for i in range(l):
+        layer = self.gpt.gpt_layers[i]
+
+        # HuggingFace-style c_attn split
+        full_weight = self.gpt.state_dict()[f'h.{i}.attn.c_attn.weight']  # shape: [3d, d]
+        full_bias   = self.gpt.state_dict()[f'h.{i}.attn.c_attn.bias']    # shape: [3d]
+
+        # Split weight
+        q_weight = full_weight[:d, :].T.clone()
+        k_weight = full_weight[d:2*d, :].T.clone()
+        v_weight = full_weight[2*d:, :].T.clone()
+
+        # Split bias
+        q_bias = full_bias[:d].clone()
+        k_bias = full_bias[d:2*d].clone()
+        v_bias = full_bias[2*d:].clone()
+
+        # Q, K, V 각각 LoRA layer로 교체
+        layer.self_attention.query = LoRA_adapter.LoRALinear(d, d, r=4, alpha=16, base_weight=q_weight)
+        layer.self_attention.key   = LoRA_adapter.LoRALinear(d, d, r=4, alpha=16, base_weight=k_weight)
+        layer.self_attention.value = LoRA_adapter.LoRALinear(d, d, r=4, alpha=16, base_weight=v_weight)
+
+        # bias는 그대로 유지
+        layer.self_attention.query.bias = nn.Parameter(q_bias)
+        layer.self_attention.key.bias   = nn.Parameter(k_bias)
+        layer.self_attention.value.bias = nn.Parameter(v_bias)
 
 
   def get_device(self):
@@ -162,6 +195,11 @@ def train(args):
   args = add_arguments(args)
   model = SonnetGPT(args)
   model = model.to(device)
+  
+  # LoRA 구조 적용
+  # model.to(device)이후, optimizer 만들기 이전에 호출해야 함.
+  model.convert_to_lora()
+
 
   # 3. 본격적인 아키텍쳐
   lr = args.lr
@@ -209,9 +247,11 @@ def generate_submission_sonnets(args):
   saved = torch.load(f'{args.epochs-1}_{args.filepath}', weights_only=False)
 
   model = SonnetGPT(saved['args'])
+  model.convert_to_lora()
   model.load_state_dict(saved['model'])
   model = model.to(device)
   model.eval()
+
 
   # held-out 데이터셋 만들기: 처음 3 줄만 있다. 나머지를 채우는 것은 여러분 몫이다!
   held_out_sonnet_dataset = SonnetsDataset(args.held_out_sonnet_path)
