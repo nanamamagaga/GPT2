@@ -57,7 +57,7 @@ class ParaphraseGPT(nn.Module):
     for param in self.gpt.parameters():
       param.requires_grad = True
 
-  def forward(self, input_ids, attention_mask):
+  
     """
     TODO: paraphrase_detection_head Linear layer를 사용하여 토큰의 레이블을 예측하시오.
 
@@ -70,7 +70,14 @@ class ParaphraseGPT(nn.Module):
     패러프레이즈가 아닌 경우에는 토큰 "no" (BPE index 3919)가 될 것이다.
     """
     ### 완성시켜야 할 빈 코드 블록
-    raise NotImplementedError
+  def forward(self, input_ids, attention_mask):
+    outputs = self.gpt(input_ids=input_ids, attention_mask=attention_mask)
+    last_token_indices = attention_mask.sum(dim=1) - 1
+    batch_size = input_ids.size(0)
+    last_hidden_states = outputs[range(batch_size), last_token_indices]
+    logits = self.paraphrase_detection_head(last_hidden_states)
+    return logits
+
 
 
 
