@@ -48,11 +48,6 @@ class GPT2Model(GPTPreTrainedModel):
     input_shape = input_ids.size()
     seq_length = input_shape[1]
 
-    
-
-    
-    
-  
     # 단어 임베딩
     inputs_embeds = self.word_embedding(input_ids)
 
@@ -64,9 +59,6 @@ class GPT2Model(GPTPreTrainedModel):
     hidden_states = inputs_embeds + pos_embeds
     hidden_states = self.embed_dropout(hidden_states)
     return hidden_states
-
-
-    
 
     ### TODO: pos_ids를 사용하여 self.pos_embedding에서 위치 임베딩을 가져와 pos_embeds에 저장한다.
     ###       그런 다음, 두 개의 임베딩을 더하고, 드롭아웃을 적용한 뒤 반환한다.

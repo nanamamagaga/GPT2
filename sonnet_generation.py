@@ -10,7 +10,7 @@ SonnetGPT 모델을 훈련하고, 필요한 제출용 파일을 작성한다.
 
 # 차원을 엄밀하게 계산하며 파악하자.
 
-import argparse
+import argparse, os
 import random
 import torch
 
@@ -80,26 +80,24 @@ class SonnetGPT(nn.Module):
   
   def convert_to_lora(self, l=9):
     """
-    기존 GPT2의 Q/K/V 프로젝션 레이어를 LoRALinear로 교체하여 파라미터 효율화 및 학습 속도 개선을 가능하게 한다.
+    GPT2의 Q/K/V 프로젝션 레이어를 LoRALinear로 교체.
+    l: 시작 레이어 (기본값 = 9 → 9,10,11 레이어만 적용)
     """
+    d = 768  # hidden dim
 
-    d = 768      # hidden dim
+    for i in range(l, 12):  # 상위 레이어만 적용
+      layer = self.gpt.gpt_layers[i]
 
-    for i in range(l, 13):
-        layer = self.gpt.gpt_layers[i]
+      # 기존 가중치를 복사
+      q_weight = layer.self_attention.query.weight.data.clone()
+      k_weight = layer.self_attention.key.weight.data.clone()
+      v_weight = layer.self_attention.value.weight.data.clone()
 
-        # HuggingFace-style c_attn split
-        full_weight = self.gpt.state_dict()[f'h.{i}.attn.c_attn.weight']  # shape: [3d, d]
+      # LoRA로 대체
+      layer.self_attention.query = LoRA_adapter.LoRALinear(d, d, r=4, alpha=16, base_weight=q_weight)
+      layer.self_attention.key   = LoRA_adapter.LoRALinear(d, d, r=4, alpha=16, base_weight=k_weight)
+      layer.self_attention.value = LoRA_adapter.LoRALinear(d, d, r=4, alpha=16, base_weight=v_weight)
 
-        # Split weight
-        q_weight = full_weight[:d, :].T.clone()
-        k_weight = full_weight[d:2*d, :].T.clone()
-        v_weight = full_weight[2*d:, :].T.clone()
-        
-        # Q, K, V 각각 LoRA layer로 교체
-        layer.self_attention.query = LoRA_adapter.LoRALinear(d, d, r=4, alpha=16, base_weight=q_weight)
-        layer.self_attention.key   = LoRA_adapter.LoRALinear(d, d, r=4, alpha=16, base_weight=k_weight)
-        layer.self_attention.value = LoRA_adapter.LoRALinear(d, d, r=4, alpha=16, base_weight=v_weight)
 
   def get_device(self):
     for param in self.gpt.parameters():
@@ -170,29 +168,38 @@ def save_model(model, optimizer, args, filepath):
 def train(args):
   """Sonnet 데이터셋에서 소넷 생성을 위해 GPT-2 훈련.""" 
   device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
-  
-  # 1. 데이터, 해당 데이터셋 및 데이터로드 생성하기.
   sonnet_dataset = SonnetsDataset(args.sonnet_path)
   sonnet_dataloader = DataLoader(sonnet_dataset, shuffle=True, batch_size=args.batch_size,
                                  collate_fn=sonnet_dataset.collate_fn)
-
-  # 2. held-out 데이터셋 만들기: 처음 3 줄만 있다. 나머지를 채우는 것은 여러분 몫이다!
   held_out_sonnet_dataset = SonnetsDataset(args.held_out_sonnet_path)
 
   args = add_arguments(args)
   model = SonnetGPT(args)
   model = model.to(device)
-  
   # LoRA 구조 적용
   # model.to(device)이후, optimizer 만들기 이전에 호출해야 함.
   model.convert_to_lora(l=9)
-
-
-  # 3. 본격적인 아키텍쳐
   lr = args.lr
   optimizer = AdamW(model.parameters(), lr=lr)
 
-  for epoch in range(args.epochs):
+  # ────────────── (1) 체크포인트 있으면 불러오기 ───────────────
+  start_epoch = 0
+  if os.path.isfile(args.filepath):
+      # 파일 이름에서 epoch 숫자 추출: '0-10-sonnet.pt' → 10
+      try:
+          epoch_from_name = int(os.path.basename(args.filepath).split('-')[1])
+      except ValueError:
+          epoch_from_name = 0
+
+      if epoch_from_name > 0:
+          ckpt = torch.load(args.filepath, map_location=device)
+          model.load_state_dict(ckpt['model'])
+          optimizer.load_state_dict(ckpt['optim'])
+          start_epoch = epoch_from_name          # 이때부터 다시 학습
+          print(f"▶ Resumed from {args.filepath} (epoch {start_epoch})")
+          
+  # ──────────────────────── (2) 학습 루프 ───────────────────────
+  for epoch in range(start_epoch, args.epochs):
     model.train()
     train_loss = 0
     num_batches = 0
@@ -225,13 +232,14 @@ def train(args):
       print(f'{batch[1]}{output[1]}\n\n')
 
     # TODO: 소넷의 작은 테이터셋에서 과적합을 방지하기 위한 종료 조건을 생각하시오.
-    save_model(model, optimizer, args, f'{epoch}_{args.filepath}')
+    args.filepath = f'{version}-{epoch+1}-sonnet.pt'
+    save_model(model, optimizer, args, f'{args.filepath}')
 
 
 @torch.no_grad()
 def generate_submission_sonnets(args):
   device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
-  saved = torch.load(f'{args.epochs-1}_{args.filepath}', weights_only=False)
+  saved = torch.load(f'{args.filepath}', weights_only=False)
 
   model = SonnetGPT(saved['args'])
   model.convert_to_lora(l=9)
@@ -269,7 +277,7 @@ def get_args():
   parser.add_argument("--sonnet_out", type=str, default="predictions/generated_sonnets.txt")
 
   parser.add_argument("--seed", type=int, default=11711)
-  parser.add_argument("--epochs", type=int, default=10)
+  parser.add_argument("--epochs", type=int, default=3) # 훈련시킬 총 epoch 수
   parser.add_argument("--use_gpu", action='store_true')
 
   # Generation parameters.
@@ -307,8 +315,29 @@ def add_arguments(args):
 
 
 if __name__ == "__main__":
+  
+  total_epoch = 0
+  version = 0
+  '''
+  version_0: LoRA + Instruction
+  '''
+  
   args = get_args()
-  args.filepath = f'{args.epochs}-{args.lr}-sonnet.pt'  # 경로명 저장.
+  args.filepath = f'{version}-{total_epoch}-sonnet.pt'  # 경로명 저장.
   seed_everything(args.seed)  # 재현성을 위한 random seed 고정.
-  #train(args)
+  train(args)
   generate_submission_sonnets(args)
+  
+  '''
+  훈련 로그
+  {date: 05-25, train: 10, time_taken: ?, accuracy: ?}
+  
+  '''
+  '''
+  목표
+  1. 매번 train할 때마다 가중치를 새로 학습하는건 별로다.
+  2. 가중치를 로드했다가 다시 train 할 것이다.
+  3. 인자값을 바꾸면 안되므로, 우린 filepath에 메타데이터를 넣을 것이다.
+  4. 넣고싶은 메타데이터는 version, total_epoch이다.
+
+  '''
