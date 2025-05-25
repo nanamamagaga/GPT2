@@ -214,4 +214,3 @@ if __name__ == "__main__":
     seed_everything(args.seed)
     train(args)
     test(args)
-
