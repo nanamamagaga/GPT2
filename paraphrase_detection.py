@@ -71,12 +71,23 @@ class ParaphraseGPT(nn.Module):
     """
     ### 완성시켜야 할 빈 코드 블록
   def forward(self, input_ids, attention_mask):
+    # GPT-2 모델 실행
     outputs = self.gpt(input_ids=input_ids, attention_mask=attention_mask)
-    last_token_indices = attention_mask.sum(dim=1) - 1
-    batch_size = input_ids.size(0)
-    last_hidden_states = outputs[torch.arange(batch_size), last_token_indices]
-    logits = self.paraphrase_detection_head(last_hidden_states)
+    
+    # GPT-2의 마지막 hidden state 출력 가져오기: (batch_size, seq_len, hidden_dim)
+    hidden_states = outputs.last_hidden_state
+    
+    # 각 문장의 실제 길이를 계산 (패딩 제외)
+    seq_lengths = attention_mask.sum(dim=1) - 1  # 마지막 토큰의 위치 (0-based index)
+
+    # 각 문장에서 마지막 유효 토큰의 hidden state만 추출
+    last_hidden = hidden_states[torch.arange(hidden_states.size(0)), seq_lengths]
+
+    # 분류 head에 넣어 yes/no 로지츠 출력 (batch_size, 2)
+    logits = self.paraphrase_detection_head(last_hidden)
+
     return logits
+
 
 
 
