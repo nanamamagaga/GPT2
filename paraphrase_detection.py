@@ -50,35 +50,28 @@ class ParaphraseGPT(nn.Module):
 
   def __init__(self, args):
     super().__init__()
-    self.gpt = GPT2Model.from_pretrained(model=args.model_size, d=args.d, l=args.l, num_heads=args.num_heads)
-    self.paraphrase_detection_head = nn.Linear(args.d, 2)  # Paraphrase detection 의 출력은 두 가지: 1 (yes) or 0 (no).
+    # our GPT2Model.from_pretrained expects (model_name, d, l, num_heads)
+    self.gpt = GPT2Model.from_pretrained(
+      args.model_size,
+      args.d,
+      args.l,
+      args.num_heads
+    )
+    # classification head: d -> 2 classes (yes/no)
+    self.paraphrase_detection_head = nn.Linear(args.d, 2)
 
-    # 기본적으로, 전체 모델을 finetuning 한다.
+    # enable fine-tuning of all GPT parameters
     for param in self.gpt.parameters():
       param.requires_grad = True
 
-  
-    """
-    TODO: paraphrase_detection_head Linear layer를 사용하여 토큰의 레이블을 예측하시오.
-  
-
-    입력은 다음과 같은 구조를 갖는다:
-
-      'Is "{s1}" a paraphrase of "{s2}"? Answer "yes" or "no": '
-
-    따라서, 문장의 끝에서 다음 토큰에 대한 예측을 해야 할 것이다. 
-    훈련이 잘 되었다면, 패러프레이즈인 경우에는 토큰 "yes"(BPE index 8505)가, 
-    패러프레이즈가 아닌 경우에는 토큰 "no" (BPE index 3919)가 될 것이다.
-    """
-    ### 완성시켜야 할 빈 코드 블록
-  
-
   def forward(self, input_ids, attention_mask):
+    # forward through our GPT2Model
     outputs = self.gpt(input_ids=input_ids, attention_mask=attention_mask)
+    # get the last non-padding token embedding
     last_token = outputs['last_token']
+    # classification logits
     logits = self.paraphrase_detection_head(last_token)
     return logits
-
 
 
 def save_model(model, optimizer, args, filepath):
@@ -93,147 +86,3 @@ def save_model(model, optimizer, args, filepath):
 
   torch.save(save_info, filepath)
   print(f"save the model to {filepath}")
-
-
-def train(args):
-  """Quora 데이터셋에서 Paraphrase Detection을 위한 GPT-2 훈련."""
-  device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
-  # 데이터, 해당 데이터셋 및 데이터로드 생성하기.
-  para_train_data = load_paraphrase_data(args.para_train)
-  para_dev_data = load_paraphrase_data(args.para_dev)
-
-  para_train_data = ParaphraseDetectionDataset(para_train_data, args)
-  para_dev_data = ParaphraseDetectionDataset(para_dev_data, args)
-
-  para_train_dataloader = DataLoader(para_train_data, shuffle=True, batch_size=args.batch_size,
-                                     collate_fn=para_train_data.collate_fn)
-  para_dev_dataloader = DataLoader(para_dev_data, shuffle=False, batch_size=args.batch_size,
-                                   collate_fn=para_dev_data.collate_fn)
-
-  args = add_arguments(args)
-  model = ParaphraseGPT(args)
-  model = model.to(device)
-
-  lr = args.lr
-  optimizer = AdamW(model.parameters(), lr=lr, weight_decay=0.)
-  best_dev_acc = 0
-
-  for epoch in range(args.epochs):
-    model.train()
-    train_loss = 0
-    num_batches = 0
-    for batch in tqdm(para_train_dataloader, desc=f'train-{epoch}', disable=TQDM_DISABLE):
-      # 입력을 가져와서 GPU로 보내기(이 모델을 CPU에서 훈련시키는 것을 권장하지 않는다).
-      b_ids, b_mask, labels = batch['token_ids'], batch['attention_mask'], batch['labels'].flatten()
-      b_ids = b_ids.to(device)
-      b_mask = b_mask.to(device)
-      labels = labels.to(device)
-
-      # 손실, 그래디언트를 계산하고 모델 파라미터 업데이트. 
-      optimizer.zero_grad()
-      logits = model(b_ids, b_mask)
-      preds = torch.argmax(logits, dim=1)
-      loss = F.cross_entropy(logits, labels, reduction='mean')
-      loss.backward()
-      optimizer.step()
-
-      train_loss += loss.item()
-      num_batches += 1
-
-    train_loss = train_loss / num_batches
-
-    dev_acc, dev_f1, *_ = model_eval_paraphrase(para_dev_dataloader, model, device)
-
-    if dev_acc > best_dev_acc:
-      best_dev_acc = dev_acc
-      save_model(model, optimizer, args, args.filepath)
-
-    print(f"Epoch {epoch}: train loss :: {train_loss :.3f}, dev acc :: {dev_acc :.3f}")
-
-
-@torch.no_grad()
-def test(args):
-  """Evaluate your model on the dev and test datasets; save the predictions to disk."""
-  device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
-  saved = torch.load(args.filepath)
-
-  model = ParaphraseGPT(saved['args'])
-  model.load_state_dict(saved['model'])
-  model = model.to(device)
-  model.eval()
-  print(f"Loaded model to test from {args.filepath}")
-
-  para_dev_data = load_paraphrase_data(args.para_dev)
-  para_test_data = load_paraphrase_data(args.para_test, split='test')
-
-  para_dev_data = ParaphraseDetectionDataset(para_dev_data, args)
-  para_test_data = ParaphraseDetectionTestDataset(para_test_data, args)
-
-  para_dev_dataloader = DataLoader(para_dev_data, shuffle=False, batch_size=args.batch_size,
-                                   collate_fn=para_dev_data.collate_fn)
-  para_test_dataloader = DataLoader(para_test_data, shuffle=True, batch_size=args.batch_size,
-                                    collate_fn=para_test_data.collate_fn)
-
-  dev_para_acc, _, dev_para_y_pred, _, dev_para_sent_ids = model_eval_paraphrase(para_dev_dataloader, model, device)
-  print(f"dev paraphrase acc :: {dev_para_acc :.3f}")
-  test_para_y_pred, test_para_sent_ids = model_test_paraphrase(para_test_dataloader, model, device)
-
-  with open(args.para_dev_out, "w+") as f:
-    f.write(f"id \t Predicted_Is_Paraphrase \n")
-    for p, s in zip(dev_para_sent_ids, dev_para_y_pred):
-      f.write(f"{p}, {s} \n")
-
-  with open(args.para_test_out, "w+") as f:
-    f.write(f"id \t Predicted_Is_Paraphrase \n")
-    for p, s in zip(test_para_sent_ids, test_para_y_pred):
-      f.write(f"{p}, {s} \n")
-
-
-def get_args():
-  parser = argparse.ArgumentParser()
-
-  parser.add_argument("--para_train", type=str, default="data/quora-train.csv")
-  parser.add_argument("--para_dev", type=str, default="data/quora-dev.csv")
-  parser.add_argument("--para_test", type=str, default="data/quora-test-student.csv")
-  parser.add_argument("--para_dev_out", type=str, default="predictions/para-dev-output.csv")
-  parser.add_argument("--para_test_out", type=str, default="predictions/para-test-output.csv")
-
-  parser.add_argument("--seed", type=int, default=11711)
-  parser.add_argument("--epochs", type=int, default=10)
-  parser.add_argument("--use_gpu", action='store_true')
-
-  parser.add_argument("--batch_size", help='sst: 64, cfimdb: 8 can fit a 12GB GPU', type=int, default=8)
-  parser.add_argument("--lr", type=float, help="learning rate", default=1e-5)
-  parser.add_argument("--model_size", type=str,
-                      help="The model size as specified on hugging face. DO NOT use the xl model.",
-                      choices=['gpt2', 'gpt2-medium', 'gpt2-large'], default='gpt2')
-
-  args = parser.parse_args()
-  return args
-
-
-def add_arguments(args):
-  """모델 크기에 따라 결정되는 인수들을 추가."""
-  if args.model_size == 'gpt2':
-    args.d = 768
-    args.l = 12
-    args.num_heads = 12
-  elif args.model_size == 'gpt2-medium':
-    args.d = 1024
-    args.l = 24
-    args.num_heads = 16
-  elif args.model_size == 'gpt2-large':
-    args.d = 1280
-    args.l = 36
-    args.num_heads = 20
-  else:
-    raise Exception(f'{args.model_size} is not supported.')
-  return args
-
-
-if __name__ == "__main__":
-  args = get_args()
-  args.filepath = f'{args.epochs}-{args.lr}-paraphrase.pt'  # 경로명 저장.
-  seed_everything(args.seed)  # 재현성을 위한 random seed 고정.
-  train(args)
-  test(args)
