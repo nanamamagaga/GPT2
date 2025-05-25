@@ -60,6 +60,7 @@ class ParaphraseGPT(nn.Module):
   
     """
     TODO: paraphrase_detection_head Linear layer를 사용하여 토큰의 레이블을 예측하시오.
+  
 
     입력은 다음과 같은 구조를 갖는다:
 
@@ -70,18 +71,13 @@ class ParaphraseGPT(nn.Module):
     패러프레이즈가 아닌 경우에는 토큰 "no" (BPE index 3919)가 될 것이다.
     """
     ### 완성시켜야 할 빈 코드 블록
+  
+
   def forward(self, input_ids, attention_mask):
-    # GPT-2 모델 실행
     outputs = self.gpt(input_ids=input_ids, attention_mask=attention_mask)
-    
-    # GPT 출력에서 마지막 유효 토큰의 hidden state 추출
-    last_hidden = outputs['last_token']
-
-    # 분류 head에 통과시켜 yes/no 판단
-    logits = self.paraphrase_detection_head(last_hidden)
+    last_token = outputs['last_token']
+    logits = self.paraphrase_detection_head(last_token)
     return logits
-
-
 
 
 
