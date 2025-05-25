@@ -23,9 +23,9 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from datasets import (
-  ParaphraseDetectionDataset,
-  ParaphraseDetectionTestDataset,
-  load_paraphrase_data
+    ParaphraseDetectionDataset,
+    ParaphraseDetectionTestDataset,
+    load_paraphrase_data
 )
 from evaluation import model_eval_paraphrase, model_test_paraphrase
 from models.gpt2 import GPT2Model
@@ -36,53 +36,200 @@ TQDM_DISABLE = False
 
 # Fix the random seed.
 def seed_everything(seed=11711):
-  random.seed(seed)
-  np.random.seed(seed)
-  torch.manual_seed(seed)
-  torch.cuda.manual_seed(seed)
-  torch.cuda.manual_seed_all(seed)
-  torch.backends.cudnn.benchmark = False
-  torch.backends.cudnn.deterministic = True
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
 
 
 class ParaphraseGPT(nn.Module):
-  """Paraphrase Detection을 위해 설계된 여러분의 GPT-2 Model."""
+    """Paraphrase Detection을 위해 설계된 여러분의 GPT-2 Model."""
 
-  def __init__(self, args):
-    super().__init__()
-    # our GPT2Model.from_pretrained expects (model_name, d, l, num_heads)
-    self.gpt = GPT2Model.from_pretrained(
-      args.model_size,
-      args.d,
-      args.l,
-      args.num_heads
-    )
-    # classification head: d -> 2 classes (yes/no)
-    self.paraphrase_detection_head = nn.Linear(args.d, 2)
+    def __init__(self, args):
+        super().__init__()
+        # our GPT2Model.from_pretrained expects (model_name, d, l, num_heads)
+        self.gpt = GPT2Model.from_pretrained(
+            args.model_size,
+            args.d,
+            args.l,
+            args.num_heads
+        )
+        # classification head: d -> 2 classes (yes/no)
+        self.paraphrase_detection_head = nn.Linear(args.d, 2)
 
-    # enable fine-tuning of all GPT parameters
-    for param in self.gpt.parameters():
-      param.requires_grad = True
+        # enable fine-tuning of all GPT parameters
+        for param in self.gpt.parameters():
+            param.requires_grad = True
 
-  def forward(self, input_ids, attention_mask):
-    # forward through our GPT2Model
-    outputs = self.gpt(input_ids=input_ids, attention_mask=attention_mask)
-    # get the last non-padding token embedding
-    last_token = outputs['last_token']
-    # classification logits
-    logits = self.paraphrase_detection_head(last_token)
-    return logits
+    def forward(self, input_ids, attention_mask):
+        # forward through our GPT2Model
+        outputs = self.gpt(input_ids=input_ids, attention_mask=attention_mask)
+        # dict 접근 방식으로 값을 꺼냄
+        last_token = outputs['last_token']
+        # classification logits
+        logits = self.paraphrase_detection_head(last_token)
+        return logits
 
 
 def save_model(model, optimizer, args, filepath):
-  save_info = {
-    'model': model.state_dict(),
-    'optim': optimizer.state_dict(),
-    'args': args,
-    'system_rng': random.getstate(),
-    'numpy_rng': np.random.get_state(),
-    'torch_rng': torch.random.get_rng_state(),
-  }
+    save_info = {
+        'model': model.state_dict(),
+        'optim': optimizer.state_dict(),
+        'args': args,
+        'system_rng': random.getstate(),
+        'numpy_rng': np.random.get_state(),
+        'torch_rng': torch.random.get_rng_state(),
+    }
 
-  torch.save(save_info, filepath)
-  print(f"save the model to {filepath}")
+    torch.save(save_info, filepath)
+    print(f"save the model to {filepath}")
+
+
+def train(args):
+    """Quora 데이터셋에서 Paraphrase Detection을 위한 GPT-2 훈련."""
+    device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
+
+    # 데이터 로드 및 DataLoader 생성
+    para_train_data = load_paraphrase_data(args.para_train)
+    para_dev_data = load_paraphrase_data(args.para_dev)
+
+    para_train_data = ParaphraseDetectionDataset(para_train_data, args)
+    para_dev_data = ParaphraseDetectionDataset(para_dev_data, args)
+
+    para_train_dataloader = DataLoader(
+        para_train_data,
+        shuffle=True,
+        batch_size=args.batch_size,
+        collate_fn=para_train_data.collate_fn
+    )
+    para_dev_dataloader = DataLoader(
+        para_dev_data,
+        shuffle=False,
+        batch_size=args.batch_size,
+        collate_fn=para_dev_data.collate_fn
+    )
+
+    args = add_arguments(args)
+    model = ParaphraseGPT(args).to(device)
+
+    optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=0.)
+    best_dev_acc = 0
+
+    for epoch in range(args.epochs):
+        model.train()
+        train_loss = 0
+        num_batches = 0
+        for batch in tqdm(para_train_dataloader, desc=f'train-{epoch}', disable=TQDM_DISABLE):
+            b_ids = batch['token_ids'].to(device)
+            b_mask = batch['attention_mask'].to(device)
+            labels = batch['labels'].flatten().to(device)
+
+            optimizer.zero_grad()
+            logits = model(b_ids, b_mask)
+            loss = F.cross_entropy(logits, labels)
+            loss.backward()
+            optimizer.step()
+
+            train_loss += loss.item()
+            num_batches += 1
+
+        train_loss /= num_batches
+
+        dev_acc, dev_f1, *_ = model_eval_paraphrase(para_dev_dataloader, model, device)
+        if dev_acc > best_dev_acc:
+            best_dev_acc = dev_acc
+            save_model(model, optimizer, args, args.filepath)
+
+        print(f"Epoch {epoch}: train loss :: {train_loss:.3f}, dev acc :: {dev_acc:.3f}")
+
+
+@torch.no_grad()
+def test(args):
+    """Evaluate your model on the dev and test datasets; save the predictions to disk."""
+    device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
+    saved = torch.load(args.filepath)
+
+    model = ParaphraseGPT(saved['args'])
+    model.load_state_dict(saved['model'])
+    model = model.to(device).eval()
+    print(f"Loaded model to test from {args.filepath}")
+
+    para_dev_data = load_paraphrase_data(args.para_dev)
+    para_test_data = load_paraphrase_data(args.para_test, split='test')
+
+    para_dev_data = ParaphraseDetectionDataset(para_dev_data, args)
+    para_test_data = ParaphraseDetectionTestDataset(para_test_data, args)
+
+    para_dev_dataloader = DataLoader(
+        para_dev_data,
+        shuffle=False,
+        batch_size=args.batch_size,
+        collate_fn=para_dev_data.collate_fn
+    )
+    para_test_dataloader = DataLoader(
+        para_test_data,
+        shuffle=True,
+        batch_size=args.batch_size,
+        collate_fn=para_test_data.collate_fn
+    )
+
+    dev_para_acc, _, dev_para_y_pred, _, dev_para_sent_ids = model_eval_paraphrase(
+        para_dev_dataloader, model, device
+    )
+    print(f"dev paraphrase acc :: {dev_para_acc:.3f}")
+
+    test_para_y_pred, test_para_sent_ids = model_test_paraphrase(
+        para_test_dataloader, model, device
+    )
+
+    with open(args.para_dev_out, "w+") as f:
+        f.write("id\tPredicted_Is_Paraphrase\n")
+        for p, s in zip(dev_para_sent_ids, dev_para_y_pred):
+            f.write(f"{p}, {s}\n")
+
+    with open(args.para_test_out, "w+") as f:
+        f.write("id\tPredicted_Is_Paraphrase\n")
+        for p, s in zip(test_para_sent_ids, test_para_y_pred):
+            f.write(f"{p}, {s}\n")
+
+
+def get_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--para_train", type=str, default="data/quora-train.csv")
+    parser.add_argument("--para_dev", type=str, default="data/quora-dev.csv")
+    parser.add_argument("--para_test", type=str, default="data/quora-test-student.csv")
+    parser.add_argument("--para_dev_out", type=str, default="predictions/para-dev-output.csv")
+    parser.add_argument("--para_test_out", type=str, default="predictions/para-test-output.csv")
+    parser.add_argument("--seed", type=int, default=11711)
+    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--use_gpu", action='store_true')
+    parser.add_argument("--batch_size", type=int, default=8,
+                        help='sst: 64, cfimdb: 8 can fit a 12GB GPU')
+    parser.add_argument("--lr", type=float, default=1e-5, help="learning rate")
+    parser.add_argument("--model_size", type=str,
+                        choices=['gpt2', 'gpt2-medium', 'gpt2-large'],
+                        default='gpt2', help="HuggingFace model name")
+    return parser.parse_args()
+
+
+def add_arguments(args):
+    if args.model_size == 'gpt2':
+        args.d = 768;  args.l = 12; args.num_heads = 12
+    elif args.model_size == 'gpt2-medium':
+        args.d = 1024; args.l = 24; args.num_heads = 16
+    elif args.model_size == 'gpt2-large':
+        args.d = 1280; args.l = 36; args.num_heads = 20
+    else:
+        raise ValueError(f"Unsupported model size: {args.model_size}")
+    return args
+
+
+if __name__ == "__main__":
+    args = get_args()
+    args.filepath = f"{args.epochs}-{args.lr}-paraphrase.pt"
+    seed_everything(args.seed)
+    train(args)
+    test(args)
