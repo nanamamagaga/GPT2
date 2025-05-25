@@ -78,41 +78,28 @@ class SonnetGPT(nn.Module):
     return logits
 
   
-  def convert_to_lora(self):
+  def convert_to_lora(self, l=9):
     """
     기존 GPT2의 Q/K/V 프로젝션 레이어를 LoRALinear로 교체하여 파라미터 효율화 및 학습 속도 개선을 가능하게 한다.
     """
 
-    l = 12       # number of layers
     d = 768      # hidden dim
 
-    for i in range(l):
+    for i in range(l, 13):
         layer = self.gpt.gpt_layers[i]
 
         # HuggingFace-style c_attn split
         full_weight = self.gpt.state_dict()[f'h.{i}.attn.c_attn.weight']  # shape: [3d, d]
-        full_bias   = self.gpt.state_dict()[f'h.{i}.attn.c_attn.bias']    # shape: [3d]
 
         # Split weight
         q_weight = full_weight[:d, :].T.clone()
         k_weight = full_weight[d:2*d, :].T.clone()
         v_weight = full_weight[2*d:, :].T.clone()
-
-        # Split bias
-        q_bias = full_bias[:d].clone()
-        k_bias = full_bias[d:2*d].clone()
-        v_bias = full_bias[2*d:].clone()
-
+        
         # Q, K, V 각각 LoRA layer로 교체
         layer.self_attention.query = LoRA_adapter.LoRALinear(d, d, r=4, alpha=16, base_weight=q_weight)
         layer.self_attention.key   = LoRA_adapter.LoRALinear(d, d, r=4, alpha=16, base_weight=k_weight)
         layer.self_attention.value = LoRA_adapter.LoRALinear(d, d, r=4, alpha=16, base_weight=v_weight)
-
-        # bias는 그대로 유지
-        layer.self_attention.query.bias = nn.Parameter(q_bias)
-        layer.self_attention.key.bias   = nn.Parameter(k_bias)
-        layer.self_attention.value.bias = nn.Parameter(v_bias)
-
 
   def get_device(self):
     for param in self.gpt.parameters():
@@ -198,7 +185,7 @@ def train(args):
   
   # LoRA 구조 적용
   # model.to(device)이후, optimizer 만들기 이전에 호출해야 함.
-  model.convert_to_lora()
+  model.convert_to_lora(l=9)
 
 
   # 3. 본격적인 아키텍쳐
@@ -247,7 +234,7 @@ def generate_submission_sonnets(args):
   saved = torch.load(f'{args.epochs-1}_{args.filepath}', weights_only=False)
 
   model = SonnetGPT(saved['args'])
-  model.convert_to_lora()
+  model.convert_to_lora(l=9)
   model.load_state_dict(saved['model'])
   model = model.to(device)
   model.eval()
@@ -295,9 +282,10 @@ def get_args():
   parser.add_argument("--model_size", type=str, help="The model size as specified on hugging face.",
                       choices=['gpt2', 'gpt2-medium', 'gpt2-large', 'gpt2-xl'], default='gpt2')
 
-  args = parser.parse_args()
+  #args = parser.parse_args()
+  # ✅ Colab이 추가하는 -f 인자를 무시하게 함
+  args, _ = parser.parse_known_args()
   return args
-
 
 def add_arguments(args):
   """Add arguments that are deterministic on model size."""
@@ -322,5 +310,5 @@ if __name__ == "__main__":
   args = get_args()
   args.filepath = f'{args.epochs}-{args.lr}-sonnet.pt'  # 경로명 저장.
   seed_everything(args.seed)  # 재현성을 위한 random seed 고정.
-  train(args)
+  #train(args)
   generate_submission_sonnets(args)
