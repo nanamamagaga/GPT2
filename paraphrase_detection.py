@@ -72,9 +72,7 @@ class ParaphraseGPT(nn.Module):
     ### 완성시켜야 할 빈 코드 블록
   def forward(self, input_ids, attention_mask):
     outputs = self.gpt(input_ids=input_ids, attention_mask=attention_mask)
-    last_token_indices = attention_mask.sum(dim=1) - 1
-    batch_size = input_ids.size(0)
-    last_hidden_states = outputs[torch.arange(batch_size), last_token_indices]
+    last_hidden_states = outputs['last_token']
     logits = self.paraphrase_detection_head(last_hidden_states)
     return logits
 

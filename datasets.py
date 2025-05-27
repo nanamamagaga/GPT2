@@ -40,9 +40,9 @@ class ParaphraseDetectionDataset(Dataset):
   def collate_fn(self, all_data):
     sent1 = [x[0] for x in all_data]
     sent2 = [x[1] for x in all_data]
-    # labels = torch.LongTensor([x[2] for x in all_data])
-    labels = ['yes' if label == 1 else 'no' for label in [x[2] for x in all_data]]
-    labels = self.tokenizer(labels, return_tensors='pt', padding=True, truncation=True)['input_ids']
+    labels = torch.LongTensor([x[2] for x in all_data])
+    # labels = ['yes' if label == 1 else 'no' for label in [x[2] for x in all_data]]
+    # labels = self.tokenizer(labels, return_tensors='pt', padding=True, truncation=True)['input_ids']
     sent_ids = [x[3] for x in all_data]
 
     cloze_style_sents = [f'Question 1: "{s1}"\nQuestion 2: "{s2}\nAre these questions asking the same thing?\n' for
