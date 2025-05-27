@@ -1,0 +1,7 @@
+paraphrase_detection 완료
+dataset 주석이 문제였음
+colab 실행시 
+돌릴 때 !pip install torch==2.5.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 - 버전 확인 
+!pip install sacrebleu 해야됨
+아직 전체 데이터로 안하고 데이터 수 줄여서 해서 push 안함
+dev acc 0.630 
