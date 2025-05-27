@@ -5,3 +5,4 @@ colab 실행시
 !pip install sacrebleu 해야됨
 아직 전체 데이터로 안하고 데이터 수 줄여서 해서 push 안함
 dev acc 0.630 
+전체 데이터 에폭 1으로 테스트 하고 push함 paraphrase acc 0.872
