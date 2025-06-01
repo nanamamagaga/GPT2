@@ -57,7 +57,9 @@ class SonnetGPT(nn.Module):
 
     # 기본적으로, 전체 모델을 fine-tuning한다. TODO: 이것은 좋은 생각이 아닌 것 같다.
     for param in self.gpt.parameters():
-      param.requires_grad = True
+      param.requires_grad = False # 모든 파라미터를 freeze하고, Lora Adapter만 학습 가능하게 할 것이다.
+
+
 
   def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
     """
@@ -65,6 +67,28 @@ class SonnetGPT(nn.Module):
     이를 통해, 마지막 토큰에 대한 다음 토큰의 분포만 학습하는 것이 아니라, 모델은 소네트를 구성하는 자연어 분포를 학습할 수 있다.
     """
     """Return token‑level logits (batch, seq_len, vocab_size)."""
+
+    ## Prompt 붙이기
+    # 1. Prompt 준비
+    prompt_tokens = [
+        "<task=Sonnet_Generation>",
+        "<type=spenserian>",
+        "<meter=iambic_pentameter>",
+        "<rhyme=ababcdcdefefgg>"
+    ]
+    prompt_text = " ".join(prompt_tokens)
+    prompt_ids = self.tokenizer.encode(prompt_text, add_special_tokens=False, return_tensors="pt").to(input_ids.device)
+
+    # 2. 입력과 attention mask에 프롬프트 붙이기
+    batch_size = input_ids.size(0)
+    prompt_len = prompt_ids.size(1)
+    self.prompt_len = prompt_len    # prompt_len 저장 (뒤에서 자르기 위함)
+    prompt_ids = prompt_ids.expand(batch_size, -1)
+
+    input_ids = torch.cat([prompt_ids, input_ids], dim=1)
+    prompt_mask = torch.ones((batch_size, prompt_len), dtype=attention_mask.dtype, device=attention_mask.device)
+    attention_mask = torch.cat([prompt_mask, attention_mask], dim=1)
+
     # GPT‑2 backbone → hidden states (B, T, D)
     hidden_states = self.gpt(
         input_ids=input_ids,
@@ -77,7 +101,7 @@ class SonnetGPT(nn.Module):
     logits = self.gpt.hidden_state_to_token(hidden_states['last_hidden_state']) # DxV
     return logits
 
-  
+
   def convert_to_lora(self, l=9):
     """
     GPT2의 Q/K/V 프로젝션 레이어를 LoRALinear로 교체.
@@ -166,7 +190,7 @@ def save_model(model, optimizer, args, filepath):
 
 
 def train(args):
-  """Sonnet 데이터셋에서 소넷 생성을 위해 GPT-2 훈련.""" 
+  """Sonnet 데이터셋에서 소넷 생성을 위해 GPT-2 훈련."""
   device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
   sonnet_dataset = SonnetsDataset(args.sonnet_path)
   sonnet_dataloader = DataLoader(sonnet_dataset, shuffle=True, batch_size=args.batch_size,
@@ -175,10 +199,8 @@ def train(args):
 
   args = add_arguments(args)
   model = SonnetGPT(args)
-  model = model.to(device)
-  # LoRA 구조 적용
-  # model.to(device)이후, optimizer 만들기 이전에 호출해야 함.
   model.convert_to_lora(l=9)
+  model = model.to(device)
   lr = args.lr
   optimizer = AdamW(model.parameters(), lr=lr)
 
@@ -197,7 +219,7 @@ def train(args):
           optimizer.load_state_dict(ckpt['optim'])
           start_epoch = epoch_from_name          # 이때부터 다시 학습
           print(f"▶ Resumed from {args.filepath} (epoch {start_epoch})")
-          
+
   # ──────────────────────── (2) 학습 루프 ───────────────────────
   for epoch in range(start_epoch, args.epochs):
     model.train()
@@ -213,7 +235,8 @@ def train(args):
       # 손실, 그래디언트를 계산하고 모델 파라미터 업데이트.
       optimizer.zero_grad()
       logits = model(b_ids, b_mask)
-      logits = rearrange(logits[:, :-1].contiguous(), 'b t d -> (b t) d')  # 시퀀스의 마지막 예측은 무시한다.
+      logits = logits[:, model.prompt_len:-1, :]  # prompt 이후의 예측 부분만 사용
+      logits = rearrange(logits.contiguous(), 'b t d -> (b t) d')  # 시퀀스의 마지막 예측은 무시한다.
       labels = b_ids[:, 1:].contiguous().flatten()  # 레이블을 구성하기 위해 첫번째 토큰을 무시한다.
       loss = F.cross_entropy(logits, labels, reduction='mean')
       loss.backward()
@@ -226,13 +249,13 @@ def train(args):
     print(f"Epoch {epoch}: train loss :: {train_loss :.3f}.")
     print('Generating several output sonnets...')
     model.eval()
-    for batch in held_out_sonnet_dataset:
-      encoding = model.tokenizer(batch[1], return_tensors='pt', padding=True, truncation=True).to(device)
-      output = model.generate(encoding['input_ids'], temperature=args.temperature, top_p=args.top_p)
-      print(f'{batch[1]}{output[1]}\n\n')
+    # for batch in held_out_sonnet_dataset:
+    #   encoding = model.tokenizer(batch[1], return_tensors='pt', padding=True, truncation=True).to(device)
+    #   output = model.generate(encoding['input_ids'], temperature=args.temperature, top_p=args.top_p)
+    #   print(f'{batch[1]}{output[1]}\n\n')
 
     # TODO: 소넷의 작은 테이터셋에서 과적합을 방지하기 위한 종료 조건을 생각하시오.
-    args.filepath = f'{version}-{epoch+1}-sonnet.pt'
+    args.filepath = os.path.join(drive_ckpt_dir, f'{version}-{epoch+1}-sonnet.pt')
     save_model(model, optimizer, args, f'{args.filepath}')
 
 
@@ -277,7 +300,7 @@ def get_args():
   parser.add_argument("--sonnet_out", type=str, default="predictions/generated_sonnets.txt")
 
   parser.add_argument("--seed", type=int, default=11711)
-  parser.add_argument("--epochs", type=int, default=3) # 훈련시킬 총 epoch 수
+  parser.add_argument("--epochs", type=int, default=30) # 훈련시킬 총 epoch 수
   parser.add_argument("--use_gpu", action='store_true')
 
   # Generation parameters.
@@ -315,23 +338,27 @@ def add_arguments(args):
 
 
 if __name__ == "__main__":
-  
+
   total_epoch = 0
   version = 0
   '''
   version_0: LoRA + Instruction
   '''
-  
+
   args = get_args()
-  args.filepath = f'{version}-{total_epoch}-sonnet.pt'  # 경로명 저장.
+  args.filepath = os.path.join(drive_ckpt_dir, f'{version}-{total_epoch}-sonnet.pt')
   seed_everything(args.seed)  # 재현성을 위한 random seed 고정.
   train(args)
   generate_submission_sonnets(args)
-  
+
   '''
   훈련 로그
-  {date: 05-25, train: 10, time_taken: ?, accuracy: ?}
-  
+  {date: 06-01, version: 0, train: 0, time_taken: 약 2분, loss: 5.291}
+  {date: 06-01, version: 0, train: 5, time_taken: 약 2분, loss: 5.281}
+  {date: 06-01, version: 0, train: 10, time_taken: 약 2분, loss: 5.266}
+  {date: 06-01, version: 0, train: 15, time_taken: 약 2분, loss: 5.221}
+  {date: 06-01, version: 0, train: 19, time_taken: 약 40분, loss: 5.145}
+
   '''
   '''
   목표
@@ -340,4 +367,6 @@ if __name__ == "__main__":
   3. 인자값을 바꾸면 안되므로, 우린 filepath에 메타데이터를 넣을 것이다.
   4. 넣고싶은 메타데이터는 version, total_epoch이다.
 
+
+가중치 로드 잘 안됨..
   '''

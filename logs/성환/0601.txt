@@ -1,0 +1,27 @@
+# 1.  2 epoch 당 validation dataset도 테스트해봐야 함
+
+# 2.  너무 학습이 느림 
+
+1. optimizer에는 반드시 requires_grad=True인 파라미터만 넣어야 한다.
+
+이전 코드
+optimizer = AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=1e-5)
+
+변경 후 코드
+trainable_params = [p for p in model.parameters() if p.requires_grad]
+optimizer = AdamW(trainable_params, lr=1e-5)
+
+
+2. 패딩 토큰이 Loss에 영향을 끼침
+패딩된 토큰에 대해서도 loss를 계산하고 있다면, 무의미한 토큰 때문에 평균 loss가 방해받음
+
+ignore_index=tokenizer.pad_token_id 꼭 설정했는지 확인!
+
+ loss = F.cross_entropy(...)
+→ 여기 ignore_index=tokenizer.pad_token_id 빠졌음
+👉 수정:
+
+python
+복사
+편집
+loss = F.cross_entropy(logits, labels, reduction='mean', ignore_index=model.tokenizer.pad_token_id)
