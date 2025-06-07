@@ -58,6 +58,12 @@ class SonnetGPT(nn.Module):
     # 기본적으로, 전체 모델을 fine-tuning한다. TODO: 이것은 좋은 생각이 아닌 것 같다.
     for param in self.gpt.parameters():
       param.requires_grad = False # 모든 파라미터를 freeze하고, Lora Adapter만 학습 가능하게 할 것이다.
+    
+    # 6~11층만 freeze 해제
+    for i in range(6, 12):
+        layer = self.gpt.gpt_layers[i]
+        for param in layer.parameters():
+            param.requires_grad = True
 
 
 
@@ -72,7 +78,7 @@ class SonnetGPT(nn.Module):
     # 1. Prompt 준비
     prompt_tokens = [
         "<task=Sonnet_Generation>",
-        "<type=spenserian>",
+        "<type=shakespearean>",
         "<meter=iambic_pentameter>",
         "<rhyme=ababcdcdefefgg>"
     ]
@@ -190,73 +196,114 @@ def save_model(model, optimizer, args, filepath):
 
 
 def train(args):
-  """Sonnet 데이터셋에서 소넷 생성을 위해 GPT-2 훈련."""
-  device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
-  sonnet_dataset = SonnetsDataset(args.sonnet_path)
-  sonnet_dataloader = DataLoader(sonnet_dataset, shuffle=True, batch_size=args.batch_size,
-                                 collate_fn=sonnet_dataset.collate_fn)
-  held_out_sonnet_dataset = SonnetsDataset(args.held_out_sonnet_path)
+    """Sonnet 데이터셋에서 소넷 생성을 위해 GPT-2 훈련."""
+    device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
+    sonnet_dataset = SonnetsDataset(args.sonnet_path)
+    sonnet_dataloader = DataLoader(sonnet_dataset, shuffle=True, batch_size=args.batch_size,
+                                   collate_fn=sonnet_dataset.collate_fn)
+    held_out_sonnet_dataset = SonnetsDataset(args.held_out_sonnet_path)
 
-  args = add_arguments(args)
-  model = SonnetGPT(args)
-  model.convert_to_lora(l=9)
-  model = model.to(device)
-  lr = args.lr
-  optimizer = AdamW(model.parameters(), lr=lr)
+    args = add_arguments(args)
+    model = SonnetGPT(args).to(device)
+    
+    start_epoch = 0
 
-  # ────────────── (1) 체크포인트 있으면 불러오기 ───────────────
-  start_epoch = 0
-  if os.path.isfile(args.filepath):
-      # 파일 이름에서 epoch 숫자 추출: '0-10-sonnet.pt' → 10
-      try:
-          epoch_from_name = int(os.path.basename(args.filepath).split('-')[1])
-      except ValueError:
-          epoch_from_name = 0
+    # ─────── 체크포인트 로딩 ───────
+    if os.path.isfile(args.filepath):
+        try:
+            epoch_from_name = int(os.path.basename(args.filepath).split('-')[1])
+            print("▶ 체크포인트에서 epoch 추출됨:", epoch_from_name)
+        except ValueError:
+            epoch_from_name = 0
 
-      if epoch_from_name > 0:
-          ckpt = torch.load(args.filepath, map_location=device)
-          model.load_state_dict(ckpt['model'])
-          optimizer.load_state_dict(ckpt['optim'])
-          start_epoch = epoch_from_name          # 이때부터 다시 학습
-          print(f"▶ Resumed from {args.filepath} (epoch {start_epoch})")
+        if epoch_from_name > 0:
+            ckpt = torch.load(args.filepath, map_location=device, weights_only=False)
+            try:
+                model.load_state_dict(ckpt['model'], strict=False)
+                print(f"▶ 모델 파라미터 로드 완료 (epoch {epoch_from_name})")
+            except RuntimeError as e:
+                print("❌ 모델 state_dict 로드 실패:", e)
 
-  # ──────────────────────── (2) 학습 루프 ───────────────────────
-  for epoch in range(start_epoch, args.epochs):
-    model.train()
-    train_loss = 0
-    num_batches = 0
+            try:
+                optimizer_state = ckpt.get('optim', None)
+                if optimizer_state:
+                    optimizer = AdamW([p for p in model.parameters() if p.requires_grad], lr=args.lr)
+                    optimizer.load_state_dict(optimizer_state)
+                    print("▶ 옵티마이저 로드 완료")
+            except Exception as e:
+                print("⚠️ 옵티마이저 로드 실패 (스킵됨):", e)
 
-    for batch in tqdm(sonnet_dataloader, desc=f'train-{epoch}', disable=TQDM_DISABLE):
-      # 입력을 가져와서 GPU로 보내기(이 모델을 CPU에서 훈련시키는 것을 권장하지 않는다).
-      b_ids, b_mask = batch['token_ids'], batch['attention_mask']
-      b_ids = b_ids.to(device)
-      b_mask = b_mask.to(device)
+            start_epoch = epoch_from_name
 
-      # 손실, 그래디언트를 계산하고 모델 파라미터 업데이트.
-      optimizer.zero_grad()
-      logits = model(b_ids, b_mask)
-      logits = logits[:, model.prompt_len:-1, :]  # prompt 이후의 예측 부분만 사용
-      logits = rearrange(logits.contiguous(), 'b t d -> (b t) d')  # 시퀀스의 마지막 예측은 무시한다.
-      labels = b_ids[:, 1:].contiguous().flatten()  # 레이블을 구성하기 위해 첫번째 토큰을 무시한다.
-      loss = F.cross_entropy(logits, labels, reduction='mean')
-      loss.backward()
-      optimizer.step()
+    # 체크포인트 이후에 LoRA 적용 (모델 구조 수정이므로 나중에)
+    model.convert_to_lora(l=6)
+    
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
+    optimizer = AdamW(trainable_params, lr=args.lr)
 
-      train_loss += loss.item()
-      num_batches += 1
+    # ──────────────────────── (2) 학습 루프 ───────────────────────
+    for epoch in range(start_epoch, args.epochs):
+      model.train()
+      train_loss = 0
+      num_batches = 0
 
-    train_loss = train_loss / num_batches
-    print(f"Epoch {epoch}: train loss :: {train_loss :.3f}.")
-    print('Generating several output sonnets...')
-    model.eval()
-    # for batch in held_out_sonnet_dataset:
-    #   encoding = model.tokenizer(batch[1], return_tensors='pt', padding=True, truncation=True).to(device)
-    #   output = model.generate(encoding['input_ids'], temperature=args.temperature, top_p=args.top_p)
-    #   print(f'{batch[1]}{output[1]}\n\n')
+      for batch in tqdm(sonnet_dataloader, desc=f'train-{epoch}', disable=TQDM_DISABLE):
+        # 입력을 가져와서 GPU로 보내기(이 모델을 CPU에서 훈련시키는 것을 권장하지 않는다).
+        b_ids, b_mask = batch['token_ids'], batch['attention_mask']
+        b_ids = b_ids.to(device)
+        b_mask = b_mask.to(device)
 
-    # TODO: 소넷의 작은 테이터셋에서 과적합을 방지하기 위한 종료 조건을 생각하시오.
-    args.filepath = os.path.join(drive_ckpt_dir, f'{version}-{epoch+1}-sonnet.pt')
-    save_model(model, optimizer, args, f'{args.filepath}')
+        # 손실, 그래디언트를 계산하고 모델 파라미터 업데이트.
+        optimizer.zero_grad()
+        logits = model(b_ids, b_mask)
+        logits = logits[:, model.prompt_len:-1, :]  # prompt 이후의 예측 부분만 사용
+        logits = rearrange(logits.contiguous(), 'b t d -> (b t) d')  # 시퀀스의 마지막 예측은 무시한다.
+        labels = b_ids[:, 1:].contiguous().flatten()  # 레이블을 구성하기 위해 첫번째 토큰을 무시한다.
+        loss = F.cross_entropy(logits, labels, reduction='mean', ignore_index=model.tokenizer.pad_token_id)
+        loss.backward()
+        optimizer.step()
+
+        train_loss += loss.item()
+        num_batches += 1
+
+      train_loss = train_loss / num_batches
+      print(f"Epoch {epoch}: train loss :: {train_loss :.3f}.")
+      print('Generating several output sonnets...')
+      model.eval()
+
+
+      # for batch in held_out_sonnet_dataset:
+      #   encoding = model.tokenizer(batch[1], return_tensors='pt', padding=True, truncation=True).to(device)
+      #   output = model.generate(encoding['input_ids'], temperature=args.temperature, top_p=args.top_p)
+      #   print(f'{batch[1]}{output[1]}\n\n')
+
+
+      # validation dataset에 대해 output 출력 대신, loss만 구하
+      # === Validation loss 계산 ===
+      model.eval()
+      val_loss = 0
+      val_batches = 0
+      with torch.no_grad():
+          for batch in held_out_sonnet_dataset:
+              encoding = model.tokenizer(batch[1], return_tensors='pt', padding=True, truncation=True).to(device)
+              input_ids = encoding['input_ids']
+              attention_mask = encoding['attention_mask']
+              logits = model(input_ids, attention_mask)
+              logits = logits[:, model.prompt_len:-1, :]
+              logits = rearrange(logits.contiguous(), 'b t d -> (b t) d')
+              labels = input_ids[:, 1:].contiguous().flatten()
+              loss = F.cross_entropy(logits, labels, reduction='mean', ignore_index=model.tokenizer.pad_token_id)
+              val_loss += loss.item()
+              val_batches += 1
+
+      val_loss /= val_batches
+      print(f"Epoch {epoch}: validation loss :: {val_loss :.3f}.")
+
+
+      # TODO: 소넷의 작은 테이터셋에서 과적합을 방지하기 위한 종료 조건을 생각하시오.
+      if (epoch + 1) % 5 == 0:
+        args.filepath = os.path.join(drive_ckpt_dir, f'{version}-{epoch+1}-sonnet.pt')
+        save_model(model, optimizer, args, f'{args.filepath}')
 
 
 @torch.no_grad()
@@ -265,8 +312,8 @@ def generate_submission_sonnets(args):
   saved = torch.load(f'{args.filepath}', weights_only=False)
 
   model = SonnetGPT(saved['args'])
-  model.convert_to_lora(l=9)
   model.load_state_dict(saved['model'])
+  model.convert_to_lora(l=6)
   model = model.to(device)
   model.eval()
 
@@ -339,8 +386,8 @@ def add_arguments(args):
 
 if __name__ == "__main__":
 
-  total_epoch = 0
-  version = 0
+  total_epoch = 25
+  version = 3
   '''
   version_0: LoRA + Instruction
   '''
@@ -349,17 +396,54 @@ if __name__ == "__main__":
   args.filepath = os.path.join(drive_ckpt_dir, f'{version}-{total_epoch}-sonnet.pt')
   seed_everything(args.seed)  # 재현성을 위한 random seed 고정.
   train(args)
-  generate_submission_sonnets(args)
+  #generate_submission_sonnets(args)
 
   '''
   훈련 로그
+
+  __version 0__
   {date: 06-01, version: 0, train: 0, time_taken: 약 2분, loss: 5.291}
-  {date: 06-01, version: 0, train: 5, time_taken: 약 2분, loss: 5.281}
-  {date: 06-01, version: 0, train: 10, time_taken: 약 2분, loss: 5.266}
-  {date: 06-01, version: 0, train: 15, time_taken: 약 2분, loss: 5.221}
-  {date: 06-01, version: 0, train: 19, time_taken: 약 40분, loss: 5.145}
+  {date: 06-01, version: 0, train: 5, time_taken: 약 10분, loss: 5.281}
+  {date: 06-01, version: 0, train: 10, time_taken: 약 20분, loss: 5.266}
+  {date: 06-01, version: 0, train: 15, time_taken: 약 30분, loss: 5.221}
+  {date: 06-01, version: 0, train: 20, time_taken: 약 40분, loss: 5.145}
+
+  __version 1__
+  version 0 -> optimizer에는 반드시 requires_grad=True인 파라미터만 넣게 수정, 패딩된 토큰에 대해서도 loss를 계산하지 않게 -> version 1
+  
+  {date: 06-07, version: 1, train: 0, time_taken: 약 2분 20초, train_loss: 5.205, validation_loss: 5.198}
+  {date: 06-07, version: 1, train: 5, time_taken: ?, train_loss: 5.193, validation_loss: 5.194}
+  {date: 06-07, version: 1, train: 10, time_taken: ?, train_loss: 5.189, validation_loss: 5.187}
+
+  __version 2__
+  version 1 -> 9~11 layer의 전체 파라미터의 freezing을 해제 -> version 2
+
+  {date: 06-07, version: 2, train: 0, time_taken: 약 2분 30초, train_loss: 5.175, validation_loss: 5.136}
+  {date: 06-07, version: 2, train: 5, time_taken: ?, train_loss: 4.947, validation_loss: 4.960}
+  {date: 06-07, version: 2, train: 10, time_taken: ?, train_loss: 4.819, validation_loss: 4.860}
+  {date: 06-07, version: 2, train: 15, time_taken: ?, train_loss: 4.730, validation_loss: 4.783}
+  {date: 06-07, version: 2, train: 20, time_taken: ?, train_loss: 4.646, validation_loss: 4.736}
+  {date: 06-07, version: 2, train: 25, time_taken: ?, train_loss: 4.614, validation_loss: 4.706}
+
+  -> epoch 20에서 25로 갈 때 학습이 많이 느려졌다. 모델의 표현력이 아직 부족하다고 생각한다.
+
+   __version 3__
+  파이프라인 형성
+  v_3.1: 9~11 layer 열고, Lora(9~11) 적용 (2-25-sonnet.py = 3-25-sonnet)
+  v_3.2: layer 6까지 전체 파라미터 열고, LoRA(6~11)도 적용 (3-25-sonney.py -> 3-50-sonnet.py)
+  v_3.3: full finetuning + LoRA(6~11)
+  v_3.4: full finetuning + LoRA(0~11)
+
+  {date: 06-07, version: 3.1, train: 25, time_taken: ?,t rain_loss: 4.614, validation_loss: 4.706}
+
+
+
+
+
 
   '''
+  
+
   '''
   목표
   1. 매번 train할 때마다 가중치를 새로 학습하는건 별로다.
@@ -368,5 +452,4 @@ if __name__ == "__main__":
   4. 넣고싶은 메타데이터는 version, total_epoch이다.
 
 
-가중치 로드 잘 안됨..
   '''

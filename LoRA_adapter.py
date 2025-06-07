@@ -7,13 +7,7 @@ class LoRALinear(nn.Module):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
-
-        # 기존 weight (freeze)
-        if base_weight is not None:
-            self.weight = nn.Parameter(base_weight, requires_grad=False)
-        else:
-            self.weight = nn.Parameter(torch.randn(out_features, in_features) * 0.02, requires_grad=False)
-
+        
         # LoRA 파라미터
         self.A = nn.Parameter(torch.randn(r, in_features) * 0.01)  # A: [r, in]
         self.B = nn.Parameter(torch.randn(out_features, r) * 0.01) # B: [out, r]
