@@ -58,9 +58,9 @@ class SonnetGPT(nn.Module):
     # 기본적으로, 전체 모델을 fine-tuning한다. TODO: 이것은 좋은 생각이 아닌 것 같다.
     for param in self.gpt.parameters():
       param.requires_grad = False # 모든 파라미터를 freeze하고, Lora Adapter만 학습 가능하게 할 것이다.
-    
+
     # 6~11층만 freeze 해제
-    for i in range(6, 12):
+    for i in range(9, 12):
         layer = self.gpt.gpt_layers[i]
         for param in layer.parameters():
             param.requires_grad = True
@@ -194,7 +194,6 @@ def save_model(model, optimizer, args, filepath):
   torch.save(save_info, filepath)
   print(f"save the model to {filepath}")
 
-
 def train(args):
     """Sonnet 데이터셋에서 소넷 생성을 위해 GPT-2 훈련."""
     device = torch.device('cuda') if args.use_gpu else torch.device('cpu')
@@ -204,8 +203,25 @@ def train(args):
     held_out_sonnet_dataset = SonnetsDataset(args.held_out_sonnet_path)
 
     args = add_arguments(args)
-    model = SonnetGPT(args).to(device)
-    
+    model = SonnetGPT(args)
+
+    # LoRA 설정
+    model.convert_to_lora(l=6)
+    layers_to_freeze = [6, 7, 8]
+    for i in layers_to_freeze:
+        attn = model.gpt.gpt_layers[i].self_attention
+
+        for lora_module in [attn.query, attn.key, attn.value]:
+            lora_module.A.requires_grad = False
+            lora_module.B.requires_grad = False
+
+
+
+    model = model.to(device)
+
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
+    optimizer = AdamW(trainable_params, lr=args.lr)
+
     start_epoch = 0
 
     # ─────── 체크포인트 로딩 ───────
@@ -227,19 +243,12 @@ def train(args):
             try:
                 optimizer_state = ckpt.get('optim', None)
                 if optimizer_state:
-                    optimizer = AdamW([p for p in model.parameters() if p.requires_grad], lr=args.lr)
                     optimizer.load_state_dict(optimizer_state)
                     print("▶ 옵티마이저 로드 완료")
             except Exception as e:
                 print("⚠️ 옵티마이저 로드 실패 (스킵됨):", e)
 
             start_epoch = epoch_from_name
-
-    # 체크포인트 이후에 LoRA 적용 (모델 구조 수정이므로 나중에)
-    model.convert_to_lora(l=6)
-    
-    trainable_params = [p for p in model.parameters() if p.requires_grad]
-    optimizer = AdamW(trainable_params, lr=args.lr)
 
     # ──────────────────────── (2) 학습 루프 ───────────────────────
     for epoch in range(start_epoch, args.epochs):
@@ -254,12 +263,45 @@ def train(args):
         b_mask = b_mask.to(device)
 
         # 손실, 그래디언트를 계산하고 모델 파라미터 업데이트.
-        optimizer.zero_grad()
-        logits = model(b_ids, b_mask)
-        logits = logits[:, model.prompt_len:-1, :]  # prompt 이후의 예측 부분만 사용
-        logits = rearrange(logits.contiguous(), 'b t d -> (b t) d')  # 시퀀스의 마지막 예측은 무시한다.
-        labels = b_ids[:, 1:].contiguous().flatten()  # 레이블을 구성하기 위해 첫번째 토큰을 무시한다.
-        loss = F.cross_entropy(logits, labels, reduction='mean', ignore_index=model.tokenizer.pad_token_id)
+        # optimizer.zero_grad()
+        # logits = model(b_ids, b_mask)
+        # logits = logits[:, model.prompt_len:-1, :]  # prompt 이후의 예측 부분만 사용
+        # logits = rearrange(logits.contiguous(), 'b t d -> (b t) d')  # 시퀀스의 마지막 예측은 무시한다.
+        # labels = b_ids[:, 1:].contiguous().flatten()  # 레이블을 구성하기 위해 첫번째 토큰을 무시한다.
+        # loss = F.cross_entropy(logits, labels, reduction='mean', ignore_index=model.tokenizer.pad_token_id)
+        
+        
+        # 기존 loss는 주석 처리하고, R-Drop Loss 도입
+        # 1. 두 번 forward
+        logits1 = model(b_ids, b_mask)
+        logits2 = model(b_ids, b_mask)
+
+        # 2. prompt 이후만 사용, reshape
+        logits1 = logits1[:, model.prompt_len:-1, :]
+        logits2 = logits2[:, model.prompt_len:-1, :]
+        logits1 = rearrange(logits1.contiguous(), 'b t d -> (b t) d')
+        logits2 = rearrange(logits2.contiguous(), 'b t d -> (b t) d')
+
+        labels = b_ids[:, 1:].contiguous().flatten()
+
+        # 3. CE loss 두 번 계산
+        ce1 = F.cross_entropy(logits1, labels, reduction='mean', ignore_index=model.tokenizer.pad_token_id)
+        ce2 = F.cross_entropy(logits2, labels, reduction='mean', ignore_index=model.tokenizer.pad_token_id)
+
+        # 4. KL Divergence 양방향
+        p1 = F.log_softmax(logits1, dim=-1)
+        p2 = F.log_softmax(logits2, dim=-1)
+        kl = (
+            F.kl_div(p1, p2.exp(), reduction='batchmean') +
+            F.kl_div(p2, p1.exp(), reduction='batchmean')
+        ) / 2
+
+        # 5. 최종 loss = (CE + KL)
+        loss = (ce1 + ce2) / 2 + 0.5 * kl  # λ = 0.5
+
+
+
+        # 그대로 ㄱㄱ
         loss.backward()
         optimizer.step()
 
@@ -301,7 +343,7 @@ def train(args):
 
 
       # TODO: 소넷의 작은 테이터셋에서 과적합을 방지하기 위한 종료 조건을 생각하시오.
-      if (epoch + 1) % 5 == 0:
+      if (epoch + 1) % 3 == 0:
         args.filepath = os.path.join(drive_ckpt_dir, f'{version}-{epoch+1}-sonnet.pt')
         save_model(model, optimizer, args, f'{args.filepath}')
 
@@ -347,15 +389,15 @@ def get_args():
   parser.add_argument("--sonnet_out", type=str, default="predictions/generated_sonnets.txt")
 
   parser.add_argument("--seed", type=int, default=11711)
-  parser.add_argument("--epochs", type=int, default=30) # 훈련시킬 총 epoch 수
-  parser.add_argument("--use_gpu", action='store_true')
+  parser.add_argument("--epochs", type=int, default=51) # 훈련시킬 총 epoch 수
+  parser.add_argument("--use_gpu", action='store_true', default=True)
 
   # Generation parameters.
   parser.add_argument("--temperature", type=float, help="softmax temperature.", default=1.2)
   parser.add_argument("--top_p", type=float, help="Cumulative probability distribution for nucleus sampling.",
                       default=0.9)
 
-  parser.add_argument("--batch_size", help='The training batch size.', type=int, default=8)
+  parser.add_argument("--batch_size", help='The training batch size.', type=int, default=6)
   parser.add_argument("--lr", type=float, help="learning rate", default=1e-5)
   parser.add_argument("--model_size", type=str, help="The model size as specified on hugging face.",
                       choices=['gpt2', 'gpt2-medium', 'gpt2-large', 'gpt2-xl'], default='gpt2')
@@ -386,7 +428,7 @@ def add_arguments(args):
 
 if __name__ == "__main__":
 
-  total_epoch = 25
+  total_epoch = 41
   version = 3
   '''
   version_0: LoRA + Instruction
@@ -402,7 +444,7 @@ if __name__ == "__main__":
   훈련 로그
 
   __version 0__
-  {date: 06-01, version: 0, train: 0, time_taken: 약 2분, loss: 5.291}
+  {date: 06-01, version: 0, train: 1, time_taken: 약 2분, loss: 5.291}
   {date: 06-01, version: 0, train: 5, time_taken: 약 10분, loss: 5.281}
   {date: 06-01, version: 0, train: 10, time_taken: 약 20분, loss: 5.266}
   {date: 06-01, version: 0, train: 15, time_taken: 약 30분, loss: 5.221}
@@ -410,8 +452,8 @@ if __name__ == "__main__":
 
   __version 1__
   version 0 -> optimizer에는 반드시 requires_grad=True인 파라미터만 넣게 수정, 패딩된 토큰에 대해서도 loss를 계산하지 않게 -> version 1
-  
-  {date: 06-07, version: 1, train: 0, time_taken: 약 2분 20초, train_loss: 5.205, validation_loss: 5.198}
+
+  {date: 06-07, version: 1, train: 1, time_taken: 약 2분 20초, train_loss: 5.205, validation_loss: 5.198}
   {date: 06-07, version: 1, train: 5, time_taken: ?, train_loss: 5.193, validation_loss: 5.194}
   {date: 06-07, version: 1, train: 10, time_taken: ?, train_loss: 5.189, validation_loss: 5.187}
 
@@ -430,19 +472,52 @@ if __name__ == "__main__":
    __version 3__
   파이프라인 형성
   v_3.1: 9~11 layer 열고, Lora(9~11) 적용 (2-25-sonnet.py = 3-25-sonnet)
-  v_3.2: layer 6까지 전체 파라미터 열고, LoRA(6~11)도 적용 (3-25-sonney.py -> 3-50-sonnet.py)
+  v_3.2: layer 6까지 전체 파라미터 열고, LoRA(9~11)도 적용 (3-25-sonney.py -> 3-50-sonnet.py)
   v_3.3: full finetuning + LoRA(6~11)
   v_3.4: full finetuning + LoRA(0~11)
 
-  {date: 06-07, version: 3.1, train: 25, time_taken: ?,t rain_loss: 4.614, validation_loss: 4.706}
+  {date: 06-07, version: 3.1, train: 25, time_taken: 약 2분 30초,t rain_loss: 4.614, validation_loss: 4.706}
+  {date: 06-07, version: 3.2, train: 26, time_taken: 약 3분,t rain_loss: 4.686, validation_loss: 4.733}
+  {date: 06-07, version: 3.2, train: 30, time_taken: 약 3분,t rain_loss: 4.490, validation_loss: 4.623}
+  {date: 06-07, version: 3.2, train: 35, time_taken: 약 3분,t rain_loss: 4.365, validation_loss: 4.572}
+  {date: 06-07, version: 3.2, train: 40, time_taken: 약 3분,t rain_loss: 4.292, validation_loss: 4.543}
+  {date: 06-07, version: 3.2, train: 45, time_taken: 약 3분,t rain_loss: 4.200, validation_loss: 4.528}
+
+  -> 계획 변경, 과적합 진행됨.. -> train_35부터 다시 학습/ 레이어를 줄인다. 9~12 레이어만 학습 -> 그럼에도 해결 X
+  -> 하이퍼 파라미터 건들인다. -> lr = 1e-5 -> 5e-6 -> let's go -> ㅈㄴ 느리다. 다시 원상복구
+  -> 아싸리 1e-3으로 크게 흔들어 버린다. -> Local minimum 탈출
+  {date: 06-07, version: 3.3, train: 36, time_taken: 약 3분,t rain_loss: 4.664, validation_loss: 4.546}
+  {date: 06-07, version: 3.3, train: 37, time_taken: 약 3분,t rain_loss: 4.084, validation_loss: 4.569}
+  {date: 06-07, version: 3.3, train: 38, time_taken: 약 3분,t rain_loss: 3.619, validation_loss: 4.669}
+
+  -> 가중치 1e-3은 그리 크지 않았다. 다만, 과적합이 발생하는걸 보니 layer를 더 줄여야 겠다. -> 마지막 레이어만 남기기
+  {date: 06-07, version: 3.3, train: 36, time_taken: 약 3분,t rain_loss: 4.593, validation_loss: 4.513}
+  {date: 06-07, version: 3.3, train: 37, time_taken: 약 3분,t rain_loss: 4.108, validation_loss: 4.530}
+  {date: 06-07, version: 3.3, train: 38, time_taken: 약 3분,t rain_loss: 3.724, validation_loss: 4.614}
+  {date: 06-07, version: 3.3, train: 39, time_taken: 약 3분,t rain_loss: 3.316, validation_loss: 4.792}
+
+  -> layer을 줄이고, lr을 1e-3을 유지했는데도 과적합이 발생했다. 일단 loss가 가장 작은 3-36-sonnet.pt로 다시 lr을 줄인 뒤 학습하려고 한다.
+  -> layer은 다시 3개만 열 것이다.
+  {date: 06-07, version: 3.3, train: 36, time_taken: 약 3분,t rain_loss: 3.988, validation_loss: 4.520}
+  {date: 06-07, version: 3.3, train: 37, time_taken: 약 3분,t rain_loss: 4.155, validation_loss: 4.520}
+  {date: 06-07, version: 3.3, train: 38, time_taken: 약 3분,t rain_loss: 4.122, validation_loss: 4.518}
+  {date: 06-07, version: 3.3, train: 39, time_taken: 약 3분,t rain_loss: 4.101, validation_loss: 4.513}
+  {date: 06-07, version: 3.3, train: 40, time_taken: 약 3분,t rain_loss: 4.099, validation_loss: 4.512}
 
 
+  -> loss function을 바꿔보려 한다. -> R-Drop Loss (KL + CE)
+4.284, 4.497
+4.224 4.489
+4.525 4.581
+4.045 4.577
 
+-> 또다시 과적함
+3-42-sonnet.pt 가중치 가지고 간다.
 
-
+어케 해야하노
 
   '''
-  
+
 
   '''
   목표
