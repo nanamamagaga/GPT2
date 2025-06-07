@@ -7,14 +7,19 @@ class LoRALinear(nn.Module):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
-        
-        # LoRA 파라미터
-        self.A = nn.Parameter(torch.randn(r, in_features) * 0.01)  # A: [r, in]
-        self.B = nn.Parameter(torch.randn(out_features, r) * 0.01) # B: [out, r]
+
+        self.A = nn.Parameter(torch.randn(r, in_features) * 0.01)
+        self.B = nn.Parameter(torch.randn(out_features, r) * 0.01)
         self.alpha = alpha
         self.r = r
 
+        # 기존 weight를 base_weight로 등록
+        if base_weight is None:
+            self.weight = nn.Parameter(torch.randn(out_features, in_features))
+        else:
+            self.weight = nn.Parameter(base_weight.clone())  # copy to detach from original
+
     def forward(self, x):
-        delta_W = self.B @ self.A  # [out, in]
+        delta_W = self.B @ self.A
         effective_weight = self.weight + (delta_W * (self.alpha / self.r))
         return F.linear(x, effective_weight)
