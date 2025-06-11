@@ -85,6 +85,7 @@ class SonnetGPT(nn.Module):
     prompt_text = " ".join(prompt_tokens)
     prompt_ids = self.tokenizer.encode(prompt_text, add_special_tokens=False, return_tensors="pt").to(input_ids.device)
 
+
     # 2. 입력과 attention mask에 프롬프트 붙이기
     batch_size = input_ids.size(0)
     prompt_len = prompt_ids.size(1)
@@ -108,14 +109,13 @@ class SonnetGPT(nn.Module):
     return logits
 
 
-  def convert_to_lora(self, l=9):
+  def convert_to_lora(self):
     """
     GPT2의 Q/K/V 프로젝션 레이어를 LoRALinear로 교체.
-    l: 시작 레이어 (기본값 = 9 → 9,10,11 레이어만 적용)
     """
     d = 768  # hidden dim
 
-    for i in range(l, 12):  # 상위 레이어만 적용
+    for i in range(0, 12):  # 상위 레이어만 적용
       layer = self.gpt.gpt_layers[i]
 
       # 기존 가중치를 복사
@@ -206,7 +206,7 @@ def train(args):
     model = SonnetGPT(args)
 
     # LoRA 설정
-    model.convert_to_lora(l=6)
+    model.convert_to_lora()
     layers_to_freeze = [6, 7, 8]
     for i in layers_to_freeze:
         attn = model.gpt.gpt_layers[i].self_attention
@@ -269,8 +269,8 @@ def train(args):
         # logits = rearrange(logits.contiguous(), 'b t d -> (b t) d')  # 시퀀스의 마지막 예측은 무시한다.
         # labels = b_ids[:, 1:].contiguous().flatten()  # 레이블을 구성하기 위해 첫번째 토큰을 무시한다.
         # loss = F.cross_entropy(logits, labels, reduction='mean', ignore_index=model.tokenizer.pad_token_id)
-        
-        
+
+
         # 기존 loss는 주석 처리하고, R-Drop Loss 도입
         # 1. 두 번 forward
         logits1 = model(b_ids, b_mask)
@@ -439,92 +439,3 @@ if __name__ == "__main__":
   seed_everything(args.seed)  # 재현성을 위한 random seed 고정.
   train(args)
   #generate_submission_sonnets(args)
-
-  '''
-  훈련 로그
-
-  __version 0__
-  {date: 06-01, version: 0, train: 1, time_taken: 약 2분, loss: 5.291}
-  {date: 06-01, version: 0, train: 5, time_taken: 약 10분, loss: 5.281}
-  {date: 06-01, version: 0, train: 10, time_taken: 약 20분, loss: 5.266}
-  {date: 06-01, version: 0, train: 15, time_taken: 약 30분, loss: 5.221}
-  {date: 06-01, version: 0, train: 20, time_taken: 약 40분, loss: 5.145}
-
-  __version 1__
-  version 0 -> optimizer에는 반드시 requires_grad=True인 파라미터만 넣게 수정, 패딩된 토큰에 대해서도 loss를 계산하지 않게 -> version 1
-
-  {date: 06-07, version: 1, train: 1, time_taken: 약 2분 20초, train_loss: 5.205, validation_loss: 5.198}
-  {date: 06-07, version: 1, train: 5, time_taken: ?, train_loss: 5.193, validation_loss: 5.194}
-  {date: 06-07, version: 1, train: 10, time_taken: ?, train_loss: 5.189, validation_loss: 5.187}
-
-  __version 2__
-  version 1 -> 9~11 layer의 전체 파라미터의 freezing을 해제 -> version 2
-
-  {date: 06-07, version: 2, train: 0, time_taken: 약 2분 30초, train_loss: 5.175, validation_loss: 5.136}
-  {date: 06-07, version: 2, train: 5, time_taken: ?, train_loss: 4.947, validation_loss: 4.960}
-  {date: 06-07, version: 2, train: 10, time_taken: ?, train_loss: 4.819, validation_loss: 4.860}
-  {date: 06-07, version: 2, train: 15, time_taken: ?, train_loss: 4.730, validation_loss: 4.783}
-  {date: 06-07, version: 2, train: 20, time_taken: ?, train_loss: 4.646, validation_loss: 4.736}
-  {date: 06-07, version: 2, train: 25, time_taken: ?, train_loss: 4.614, validation_loss: 4.706}
-
-  -> epoch 20에서 25로 갈 때 학습이 많이 느려졌다. 모델의 표현력이 아직 부족하다고 생각한다.
-
-   __version 3__
-  파이프라인 형성
-  v_3.1: 9~11 layer 열고, Lora(9~11) 적용 (2-25-sonnet.py = 3-25-sonnet)
-  v_3.2: layer 6까지 전체 파라미터 열고, LoRA(9~11)도 적용 (3-25-sonney.py -> 3-50-sonnet.py)
-  v_3.3: full finetuning + LoRA(6~11)
-  v_3.4: full finetuning + LoRA(0~11)
-
-  {date: 06-07, version: 3.1, train: 25, time_taken: 약 2분 30초,t rain_loss: 4.614, validation_loss: 4.706}
-  {date: 06-07, version: 3.2, train: 26, time_taken: 약 3분,t rain_loss: 4.686, validation_loss: 4.733}
-  {date: 06-07, version: 3.2, train: 30, time_taken: 약 3분,t rain_loss: 4.490, validation_loss: 4.623}
-  {date: 06-07, version: 3.2, train: 35, time_taken: 약 3분,t rain_loss: 4.365, validation_loss: 4.572}
-  {date: 06-07, version: 3.2, train: 40, time_taken: 약 3분,t rain_loss: 4.292, validation_loss: 4.543}
-  {date: 06-07, version: 3.2, train: 45, time_taken: 약 3분,t rain_loss: 4.200, validation_loss: 4.528}
-
-  -> 계획 변경, 과적합 진행됨.. -> train_35부터 다시 학습/ 레이어를 줄인다. 9~12 레이어만 학습 -> 그럼에도 해결 X
-  -> 하이퍼 파라미터 건들인다. -> lr = 1e-5 -> 5e-6 -> let's go -> ㅈㄴ 느리다. 다시 원상복구
-  -> 아싸리 1e-3으로 크게 흔들어 버린다. -> Local minimum 탈출
-  {date: 06-07, version: 3.3, train: 36, time_taken: 약 3분,t rain_loss: 4.664, validation_loss: 4.546}
-  {date: 06-07, version: 3.3, train: 37, time_taken: 약 3분,t rain_loss: 4.084, validation_loss: 4.569}
-  {date: 06-07, version: 3.3, train: 38, time_taken: 약 3분,t rain_loss: 3.619, validation_loss: 4.669}
-
-  -> 가중치 1e-3은 그리 크지 않았다. 다만, 과적합이 발생하는걸 보니 layer를 더 줄여야 겠다. -> 마지막 레이어만 남기기
-  {date: 06-07, version: 3.3, train: 36, time_taken: 약 3분,t rain_loss: 4.593, validation_loss: 4.513}
-  {date: 06-07, version: 3.3, train: 37, time_taken: 약 3분,t rain_loss: 4.108, validation_loss: 4.530}
-  {date: 06-07, version: 3.3, train: 38, time_taken: 약 3분,t rain_loss: 3.724, validation_loss: 4.614}
-  {date: 06-07, version: 3.3, train: 39, time_taken: 약 3분,t rain_loss: 3.316, validation_loss: 4.792}
-
-  -> layer을 줄이고, lr을 1e-3을 유지했는데도 과적합이 발생했다. 일단 loss가 가장 작은 3-36-sonnet.pt로 다시 lr을 줄인 뒤 학습하려고 한다.
-  -> layer은 다시 3개만 열 것이다.
-  {date: 06-07, version: 3.3, train: 36, time_taken: 약 3분,t rain_loss: 3.988, validation_loss: 4.520}
-  {date: 06-07, version: 3.3, train: 37, time_taken: 약 3분,t rain_loss: 4.155, validation_loss: 4.520}
-  {date: 06-07, version: 3.3, train: 38, time_taken: 약 3분,t rain_loss: 4.122, validation_loss: 4.518}
-  {date: 06-07, version: 3.3, train: 39, time_taken: 약 3분,t rain_loss: 4.101, validation_loss: 4.513}
-  {date: 06-07, version: 3.3, train: 40, time_taken: 약 3분,t rain_loss: 4.099, validation_loss: 4.512}
-
-
-  -> loss function을 바꿔보려 한다. -> R-Drop Loss (KL + CE)
-4.284, 4.497
-4.224 4.489
-4.525 4.581
-4.045 4.577
-
--> 또다시 과적함
-3-42-sonnet.pt 가중치 가지고 간다.
-
-어케 해야하노
-
-  '''
-
-
-  '''
-  목표
-  1. 매번 train할 때마다 가중치를 새로 학습하는건 별로다.
-  2. 가중치를 로드했다가 다시 train 할 것이다.
-  3. 인자값을 바꾸면 안되므로, 우린 filepath에 메타데이터를 넣을 것이다.
-  4. 넣고싶은 메타데이터는 version, total_epoch이다.
-
-
-  '''

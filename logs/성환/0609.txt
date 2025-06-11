@@ -1,0 +1,73 @@
+## 문제점: dataset 너무 작다 
+
+## 사전 지식
+1. Ground Truth 학습: 작가가 직접 쓴 시를 CLM 방식으로 학습 (원 데이터셋 기반 학습)
+2. Distillation: GPT-4o가 생성한 시를 정답처럼 학습 (GPT-4o = 교사 모델)
+3. Prompt Labeling만 GPT-4o가 수행한 경우:
+본문은 여전히 인간 작가의 것이라면 distillation은 아님
+이건 메타데이터 생성만 맡긴 것 → 학습은 ground truth
+
+## 해결책
+1. 다른 작가의 sonnet 가져오기(프롬프트 라벨링)
+-> gpt4o distillation? ground truth로 clm? -> 결정 내렸습니다. ground_truth(1000) + 세익스피어 스타일 distillation(1000)
+-> dataset이 충분해지면 풀 파인튜닝도 가능해진다.
+
+
+
+## 1.
+# Q. 왜 다른 작가의 소네트도 사용해도 괜찮은가?
+
+1. 공통 형식(shared structure)이 있기 때문
+소네트는 전통적으로 14행, 특정 운율과 라임 구조를 따릅니다.
+Shakespearean, Petrarchan, Spenserian 등 스타일은 달라도 형식적 유사성이 큽니다.
+즉, 모델이 “소네트스러운 구조”를 학습하는 데 매우 유용함.
+
+2. 학습 일반화에 도움
+다양한 작가의 표현, 어휘, 리듬 등을 보면서 모델이 더 일반적인 시 형식을 학습하게 됩니다.
+결과적으로 생성된 시가 덜 반복적이고 더 풍부한 표현을 가지게 됨.
+
+# 제약 조건: 구조(14행, 라임, 운율)는 유지되어야 함
+
+# prompt 설계
+학습 시 (Train)
+데이터 종류	입력 태그 구성
+Shakespearean 소네트	✅ <style=shakespearean> 포함
+그 외 작가 소네트	❌ <style> 태그 생략 → <rhyme>과 <meter>만 사용
+
+✅ 테스트 시 (Test)
+테스트 목적	태그 구성
+Shakespearean 스타일 생성	✅ 반드시 <style=shakespearean> 포함
+
+# loss와 학습 방식은 그대로 간다.
+1. 처음에는 Head (LM Head 또는 Linear Head)만 학습
+-> 12개 다 convert 하고, 9개 freeze -> 6개 freeze -> ...
+2. 이후 상위 Transformer layer 몇 개 (예: layer 8–11)만 열어서 미세조정
+3. 마지막엔 전층 fine-tuning
+
+
+
+# Implementation
+1. 다양한 작가의 소네트 수집 (2000편 목표)
+2. GPT-4o에게 프롬프트 라벨링 시킴
+
+P:
+{ 아래 소네트에 대해 <type>, <meter>, <rhyme> 태그를 추론해줘.
+- type: sonnet 스타일 이름 (예: shakespearean, spenserian 등)
+- meter: 주로 사용된 운율 (예: iambic_pentameter)
+- rhyme: 라임 패턴 (예: abab bcbc cdcd ee)
+
+<소네트 원문>
+...
+}
+
+3. 결과를 <task=Sonnet_Generation> <type=...> <meter=...> <rhyme=...> + Sonnet 형태로
+<- 코드로 파싱
+
+
+## GPT 4o distillation
+1. 데이터셋 확보 <- 기존 + (가져온 sonnet에 gpt의 프롬프트 라벨링)
+2. gpt 4o에 데이터셋의 input_token 삽입 -> gpt4o의 output
+3. 우린 gpt4o의 output? ground_truth? dybrid?
+
+ 
+
