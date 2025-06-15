@@ -1,16 +1,3 @@
-'''
-Paraphrase detection을 위한 시작 코드.
-
-고려 사항:
- - ParaphraseGPT: 여러분이 구현한 GPT-2 분류 모델 .
- - train: Quora paraphrase detection 데이터셋에서 ParaphraseGPT를 훈련시키는 절차.
- - test: Test 절차. 프로젝트 결과 제출에 필요한 파일들을 생성함.
-
-실행:
-  `python paraphrase_detection.py --use_gpu`
-ParaphraseGPT model을 훈련 및 평가하고, 필요한 제출용 파일을 작성한다.
-'''
-
 import argparse
 import random
 import torch
@@ -29,7 +16,7 @@ from datasets import (
 )
 from evaluation import model_eval_paraphrase, model_test_paraphrase
 from models.gpt2 import GPT2Model
-
+from transformers import GPT2Tokenizer
 from optimizer import AdamW
 
 TQDM_DISABLE = False
@@ -50,9 +37,14 @@ class ParaphraseGPT(nn.Module):
 
   def __init__(self, args):
     super().__init__()
+    self.tokenizer = GPT2Tokenizer.from_pretrained(args.model_size) 
     self.gpt = GPT2Model.from_pretrained(model=args.model_size, d=args.d, l=args.l, num_heads=args.num_heads)
     self.paraphrase_detection_head = nn.Linear(args.d, 2)  # Paraphrase detection 의 출력은 두 가지: 1 (yes) or 0 (no).
-
+    self.mlp = nn.Sequential(
+            nn.Linear(args.d, args.d),
+            nn.ReLU(),
+            nn.Linear(args.d, 2)
+        )
     # 기본적으로, 전체 모델을 finetuning 한다.
     for param in self.gpt.parameters():
       param.requires_grad = True
@@ -69,11 +61,28 @@ class ParaphraseGPT(nn.Module):
     훈련이 잘 되었다면, 패러프레이즈인 경우에는 토큰 "yes"(BPE index 8505)가, 
     패러프레이즈가 아닌 경우에는 토큰 "no" (BPE index 3919)가 될 것이다.
     """
-    ### 완성시켜야 할 빈 코드 블록
+   
   def forward(self, input_ids, attention_mask):
+    prompt_tokens = [
+      "<task=Paraphrase_Detection>",
+      "<format=cloze>",
+      "<output=yes/no>"
+    ]
+    prompt_text = " ".join(prompt_tokens)
+    prompt_ids = self.tokenizer(prompt_text, add_special_tokens=False, return_tensors="pt")["input_ids"].to(input_ids.device)
+
+   
+    batch_size = input_ids.size(0)
+    prompt_len = prompt_ids.size(1)
+    prompt_ids = prompt_ids.expand(batch_size, -1)
+    prompt_mask = torch.ones((batch_size, prompt_len), dtype=attention_mask.dtype, device=attention_mask.device)
+
+    input_ids = torch.cat([prompt_ids, input_ids], dim=1)
+    attention_mask = torch.cat([prompt_mask, attention_mask], dim=1)
+
     outputs = self.gpt(input_ids=input_ids, attention_mask=attention_mask)
-    last_hidden_states = outputs['last_token']
-    logits = self.paraphrase_detection_head(last_hidden_states)
+    last_hidden = outputs['last_token']
+    logits = self.mlp(last_hidden)
     return logits
 
 
