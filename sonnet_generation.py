@@ -275,20 +275,26 @@ def train(args):
 
       train_loss = train_loss / num_batches
       print(f"Epoch {epoch}: train loss :: {train_loss :.3f}.")
-      
+          
       if epoch % 10 == 0:
         print('Generating several output sonnets...')
         model.eval()
         for batch in held_out_sonnet_dataset:
-          encoding = model.tokenizer(batch[1], return_tensors='pt', padding=True, truncation=True).to(device)
-          output = model.generate(encoding['input_ids'], temperature=args.temperature, top_p=args.top_p)
-          print(f'{batch[1]}{output[1]}\n\n')
-          generate_submission_sonnets(args)
-          
-          
-      if epoch == args.epochs - 1:
+            encoding = model.tokenizer(batch[1], return_tensors='pt', padding=True, truncation=True).to(device)
+            output = model.generate(encoding['input_ids'], temperature=args.temperature, top_p=args.top_p)
+            print(f'{batch[1]}{output[1]}\n\n')
+
+    # 마지막 epoch일 때만 모델 저장 및 정식 제출 파일 생성
+    if epoch == args.epochs - 1:
+        print('Generating several output sonnets...')
+        model.eval()
+        for batch in held_out_sonnet_dataset:
+            encoding = model.tokenizer(batch[1], return_tensors='pt', padding=True, truncation=True).to(device)
+            output = model.generate(encoding['input_ids'], temperature=args.temperature, top_p=args.top_p)
+            print(f'{batch[1]}{output[1]}\n\n')
         args.filepath = f'{epoch+1}-sonnet.pt'
         save_model(model, optimizer, args, f'{args.filepath}')
+        generate_submission_sonnets(args)  # ✅ 이때는 파일이 존재하므로 안전하게 호출 가능
 
 
 @torch.no_grad()
