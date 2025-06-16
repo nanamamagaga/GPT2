@@ -295,8 +295,8 @@ def generate_submission_sonnets(args):
   saved = torch.load(f'{args.filepath}', weights_only=False)
 
   model = SonnetGPT(saved['args'])
-  model.load_state_dict(saved['model'])
   model.convert_to_lora()
+  model.load_state_dict(saved['model'])
   model = model.to(device)
   model.eval()
 
