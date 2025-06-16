@@ -5,25 +5,6 @@ import time
 # API 키 설정
 #client = OpenAI(api_key = "")
 
-'''
-각 입력 토큰 ≈ 100 (user) + 20 (system) = 120 tokens
-각 출력 토큰: 2행 = 약 20~30 tokens 정도
-
-API 가격
-Input: $2.00 / 1M tokens    
-Cached input: $0.50 / 1M tokens
-Output: $8.00 / 1M tokens
-
-총 입력 토큰: 1200 * 120 = 144,000 -> 0.1M -> $0.2
-총 출력 토큰: 1200 * 30 = 36,000 -> 0.03M -> $0.24
-(만약 11행을 만든다면? 1200 * 110 -> 132,000 -> 0.1M -> $0.8)
-
-실제 가격
-1. 2행 만들기: 0.61 달러 (이론상 0.44달러)
-2. 전체 소넷 만들기: 약 3달러 예상 -> 1.9 달러
-'''
-
-
 # 카테고리 정의
 theme = ["love", "betrayal", "desire", "illusion"]
 tone = ["melancholic", "bitter", "pleading"]

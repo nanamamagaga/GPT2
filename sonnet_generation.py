@@ -1,14 +1,3 @@
-'''
-소넷 생성을 위한 시작 코드.
-
-실행:
-  `python sonnet_generation.py --use_gpu`
-
-trains your SonnetGPT model and writes the required submission files.
-SonnetGPT 모델을 훈련하고, 필요한 제출용 파일을 작성한다.
-'''
-
-
 import argparse, os
 import random
 import torch
@@ -537,6 +526,7 @@ log
 {epoch: 21, train_loss: 3.929, val_loss: 5.978}
 {epoch: 26, train_loss: 3.844, val_loss: 6.033}
 
+
 {epoch: 31, train_loss: 3.765, val_loss: 6.043}
 {epoch: 36, train_loss: 3.611, val_loss: 6.020}
 {epoch: 41, train_loss: 3.526, val_loss: 6.033}
@@ -598,13 +588,13 @@ log
 {epoch: 306, train_loss: 4.590, val_loss: 4.558}
 
 
-{epoch: 310, train_loss: 2.797, val_loss: 5.299}
-{epoch: 315, train_loss: 2.346, val_loss: 6.177}
-{epoch: 320, train_loss: 2.313, val_loss: 6.343}
-{epoch: 325, train_loss: 2.294, val_loss: 6.429}
-{epoch: 330, train_loss: 2.271, val_loss: 6.514}
-{epoch: 335, train_loss: 2.252, val_loss: 6.578}
-{epoch: 340, train_loss: 2.235, val_loss: 6.629}
+{epoch: 311, train_loss: 2.797, val_loss: 5.299}
+{epoch: 316, train_loss: 2.346, val_loss: 6.177}
+{epoch: 321, train_loss: 2.313, val_loss: 6.343}
+{epoch: 326, train_loss: 2.294, val_loss: 6.429}
+{epoch: 331, train_loss: 2.271, val_loss: 6.514}
+{epoch: 336, train_loss: 2.252, val_loss: 6.578}
+{epoch: 341, train_loss: 2.235, val_loss: 6.629}
 {epoch: 345, train_loss: 2.218, val_loss: 6.662}
 {epoch: 350, train_loss: 2.199, val_loss: 6.714}
 {epoch: 355, train_loss: 2.180, val_loss: 6.770}
