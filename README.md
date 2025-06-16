@@ -23,11 +23,14 @@
 - **Paraphrase Detection 가중치 및 생성 결과**  
   🔗 [바로가기](https://drive.google.com/drive/folders/1oTZqrA6zD7hf_rNompSz5Rwkp1AQmrOc?usp=sharing)
 
-- **Sonnet Generation 가중치**  
+- **Sonnet Generation 가중치 및 생성 결과**  
   🔗 [바로가기](https://drive.google.com/drive/folders/1u8XH5Q-ZMbuLbR49O1Bbs-SGd9MDKrvt?usp=drive_link)
 
+---
 
-
+## 3. 결과보고서
+- GPT2 폴더 내에 결과보고서_1.pdf와 결과보고서_2.pdf를 구분하여 보관하였습니다.
+- 결과보고서_1.pdf에는 실험에 사용된 기법들을 정리하였고, 결과보고서_2.pdf에는 실제 Task별 실험 내용 및 결과를 정리하였습니다.
 
 
 
