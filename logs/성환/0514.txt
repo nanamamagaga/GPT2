@@ -1,5 +1,0 @@
-1. 역할 분담
--> 나: attention.py, gpt2_layer, classifier.py/ 다희: gpt2.py, optimizer.py
-
-2. attention.py 완성
-3. gpt2_layer.py 완성

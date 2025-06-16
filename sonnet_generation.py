@@ -435,7 +435,7 @@ if __name__ == "__main__":
         },
         {
             "version": 3,
-            "start_epoch": 200,
+            "start_epoch": 140,
             "end_epoch": 220,
             "freeze_lora_layers": [],
             "unfreeze_blocks": [6,7,8,9,10,11],
@@ -465,160 +465,8 @@ if __name__ == "__main__":
             "unfreeze_blocks": [6,7,8,9,10,11],
             "dataset": "distilled"
         },
-        {
-            "version": 7,
-            "start_epoch": 390,
-            "end_epoch": 430,
-            "freeze_lora_layers": [],
-            "unfreeze_blocks": [6,7,8,9,10,11],
-            "dataset": "sonnet"
-        },
-        {
-            "version": 8,
-            "start_epoch": 430,
-            "end_epoch": 480,
-            "freeze_lora_layers": [],
-            "unfreeze_blocks": [0,1,2,3,4,5,6,7,8,9,10,11],
-            "dataset": "distilled"
-        },
-        {
-            "version": 9,
-            "start_epoch": 480,
-            "end_epoch": 500,
-            "freeze_lora_layers": [],
-            "unfreeze_blocks": [0,1,2,3,4,5,6,7,8,9,10,11],
-            "dataset": "sonnet"
-        },
-
-
     ]
 
     for conf in pipeline:
         ckpt_path = train_conf(args,**conf)
         print(f"[✓] {conf['version']} 완료: {ckpt_path}")
-
-
-'''
-log
-{epoch: 0, train_loss: 5.812, val_loss: 6.107}
-{epoch: 6, train_loss: 4.548, val_loss: 5.605}
-{epoch: 11, train_loss: 4.204, val_loss: 5.754}
-{epoch: 16, train_loss: 4.040, val_loss: 5.893}
-{epoch: 21, train_loss: 3.929, val_loss: 5.978}
-{epoch: 26, train_loss: 3.844, val_loss: 6.033}
-
-
-{epoch: 31, train_loss: 3.765, val_loss: 6.043}
-{epoch: 36, train_loss: 3.611, val_loss: 6.020}
-{epoch: 41, train_loss: 3.526, val_loss: 6.033}
-{epoch: 46, train_loss: 3.454, val_loss: 6.075}
-{epoch: 51, train_loss: 3.391, val_loss: 6.113}
-{epoch: 56, train_loss: 3.337, val_loss: 6.131}
-
-{epoch: 61, train_loss: 3.283, val_loss: 6.162}
-{epoch: 66, train_loss: 3.244, val_loss: 6.193}
-{epoch: 71, train_loss: 3.202, val_loss: 6.239}
-{epoch: 76, train_loss: 3.165, val_loss: 6.273}
-{epoch: 81, train_loss: 3.129, val_loss: 6.295}
-{epoch: 86, train_loss: 3.093, val_loss: 6.326}
-{epoch: 91, train_loss: 3.069, val_loss: 6.342}
-{epoch: 96, train_loss: 3.036, val_loss: 6.364}
-{epoch: 101, train_loss: 3.008, val_loss: 6.405}
-{epoch: 106, train_loss: 2.986, val_loss: 6.435}
-{epoch: 111, train_loss: 2.959, val_loss: 6.456}
-{epoch: 116, train_loss: 2.934, val_loss: 6.467}
-{epoch: 121, train_loss: 2.914, val_loss: 6.499}
-{epoch: 126, train_loss: 2.896, val_loss: 6.502}
-{epoch: 131, train_loss: 2.877, val_loss: 6.508}
-{epoch: 136, train_loss: 2.848, val_loss: 6.571}
-
-{epoch: 141, train_loss: 2.811, val_loss: 6.554}
-{epoch: 146, train_loss: 2.738, val_loss: 6.542}
-{epoch: 151, train_loss: 2.695, val_loss: 6.576}
-{epoch: 156, train_loss: 2.662, val_loss: 6.601}
-{epoch: 161, train_loss: 2.628, val_loss: 6.612}
-{epoch: 166, train_loss: 2.594, val_loss: 6.635}
-{epoch: 171, train_loss: 2.569, val_loss: 6.668}
-{epoch: 176, train_loss: 2.544, val_loss: 6.679}
-{epoch: 181, train_loss: 2.517, val_loss: 6.681}
-{epoch: 186, train_loss: 2.487, val_loss: 6.762}
-{epoch: 191, train_loss: 2.469, val_loss: 6.742}
-{epoch: 196, train_loss: 2.445, val_loss: 6.755}
-{epoch: 201, train_loss: 2.416, val_loss: 6.832}
-{epoch: 206, train_loss: 2.389, val_loss: 6.851}
-{epoch: 211, train_loss: 2.368, val_loss: 6.909}
-{epoch: 216, train_loss: 2.349, val_loss: 6.915}
-
-{epoch: 221, train_loss: 7.015, val_loss: 6.553}
-{epoch: 226, train_loss: 5.649, val_loss: 5.438}
-{epoch: 231, train_loss: 5.316, val_loss: 5.093}
-{epoch: 236, train_loss: 5.188, val_loss: 4.937}
-{epoch: 241, train_loss: 5.111, val_loss: 4.848}
-{epoch: 246, train_loss: 5.052, val_loss: 4.791}
-{epoch: 251, train_loss: 5.005, val_loss: 4.753}
-{epoch: 256, train_loss: 4.959, val_loss: 4.725}
-{epoch: 261, train_loss: 4.938, val_loss: 4.704}
-{epoch: 266, train_loss: 4.912, val_loss: 4.687}
-{epoch: 271, train_loss: 4.889, val_loss: 4.675}
-{epoch: 276, train_loss: 4.859, val_loss: 4.664}
-{epoch: 281, train_loss: 4.848, val_loss: 4.645}
-{epoch: 286, train_loss: 4.746, val_loss: 4.606}
-{epoch: 291, train_loss: 4.709, val_loss: 4.584}
-{epoch: 296, train_loss: 4.682, val_loss: 4.572}
-{epoch: 301, train_loss: 4.632, val_loss: 4.564}
-{epoch: 306, train_loss: 4.590, val_loss: 4.558}
-
-
-{epoch: 311, train_loss: 2.797, val_loss: 5.299}
-{epoch: 316, train_loss: 2.346, val_loss: 6.177}
-{epoch: 321, train_loss: 2.313, val_loss: 6.343}
-{epoch: 326, train_loss: 2.294, val_loss: 6.429}
-{epoch: 331, train_loss: 2.271, val_loss: 6.514}
-{epoch: 336, train_loss: 2.252, val_loss: 6.578}
-{epoch: 341, train_loss: 2.235, val_loss: 6.629}
-{epoch: 345, train_loss: 2.218, val_loss: 6.662}
-{epoch: 350, train_loss: 2.199, val_loss: 6.714}
-{epoch: 355, train_loss: 2.180, val_loss: 6.770}
-{epoch: 360, train_loss: 2.163, val_loss: 6.808}
-{epoch: 365, train_loss: 2.143, val_loss: 6.870}
-{epoch: 370, train_loss: 2.131, val_loss: 6.890}
-{epoch: 375, train_loss: 2.116, val_loss: 6.928}
-{epoch: 380, train_loss: 2.094, val_loss: 6.944}
-{epoch: 385, train_loss: 2.079, val_loss: 7.007}
-
-{epoch: 390, train_loss: 5.976, val_loss: 5.272}
-{epoch: 395, train_loss: 4.726, val_loss: 4.627}
-{epoch: 400, train_loss: 4.624, val_loss: 4.576}
-{epoch: 405, train_loss: 4.581, val_loss: 4.553}
-{epoch: 410, train_loss: 4.542, val_loss: 4.538}
-{epoch: 415, train_loss: 4.505, val_loss: 4.525}
-{epoch: 420, train_loss: 4.467, val_loss: 4.519}
-{epoch: 425, train_loss: 4.422, val_loss: 4.517}
-{epoch: 430, train_loss: 2.270, val_loss: 5.445}
-{epoch: 435, train_loss: 1.882, val_loss: 6.202}
-{epoch: 440, train_loss: 1.826, val_loss: 6.448}
-{epoch: 445, train_loss: 1.782, val_loss: 6.610}
-{epoch: 450, train_loss: 1.740, val_loss: 6.721}
-{epoch: 455, train_loss: 1.699, val_loss: 6.788}
-{epoch: 460, train_loss: 1.661, val_loss: 6.913}
-{epoch: 465, train_loss: 1.621, val_loss: 7.031}
-{epoch: 470, train_loss: 1.584, val_loss: 7.164}
-{epoch: 475, train_loss: 1.543, val_loss: 7.256}
-{epoch: 480, train_loss: 5.340, val_loss: 4.990}
-{epoch: 485, train_loss: 4.240, val_loss: 4.482}
-{epoch: 490, train_loss: 4.123, val_loss: 4.461}
-{epoch: 495, train_loss: 4.026, val_loss: 4.452}
-{epoch: 500, train_loss: 3.956, val_loss: 4.453}
-{epoch: 505, train_loss: 3.863, val_loss: 4.466}
-{epoch: 510, train_loss: 3.796, val_loss: 4.481}
-{epoch: 515, train_loss: 3.723, val_loss: 4.507}
-{epoch: 520, train_loss: 3.631, val_loss: 4.534}
-{epoch: 525, train_loss: 3.548, val_loss: 4.566}
-
-
-최고기록:
-Epoch 498: train loss :: 3.981.
-Generating several output sonnets...
-Epoch 498: validation loss :: 4.448.
-
-'''

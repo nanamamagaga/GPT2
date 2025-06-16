@@ -1,2 +1,0 @@
-1. distillation dataset 생성 완료 <- 이제 파인 튜닝만 하면 됨
-2. 보고서 작성 <- let's go
