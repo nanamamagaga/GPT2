@@ -8,7 +8,6 @@ trains your SonnetGPT model and writes the required submission files.
 SonnetGPT 모델을 훈련하고, 필요한 제출용 파일을 작성한다.
 '''
 
-# 차원을 엄밀하게 계산하며 파악하자.
 
 import argparse, os
 import random
@@ -55,15 +54,15 @@ class SonnetGPT(nn.Module):
     self.tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     self.tokenizer.pad_token = self.tokenizer.eos_token  # eos_token = "End Of Sequence" 토큰, print(tokenizer.eos_token) -> # </s>
 
-    # 기본적으로, 전체 모델을 fine-tuning한다. TODO: 이것은 좋은 생각이 아닌 것 같다.
-    for param in self.gpt.parameters():
-      param.requires_grad = False # 모든 파라미터를 freeze하고, Lora Adapter만 학습 가능하게 할 것이다.
+    # # 기본적으로, 전체 모델을 fine-tuning한다. TODO: 이것은 좋은 생각이 아닌 것 같다.
+    # for param in self.gpt.parameters():
+    #   param.requires_grad = False # 모든 파라미터를 freeze하고, Lora Adapter만 학습 가능하게 할 것이다.
 
-    # 6~11층만 freeze 해제
-    for i in range(9, 12):
-        layer = self.gpt.gpt_layers[i]
-        for param in layer.parameters():
-            param.requires_grad = True
+    # # 6~11층만 freeze 해제
+    # for i in range(10, 12):
+    #     layer = self.gpt.gpt_layers[i]
+    #     for param in layer.parameters():
+    #         param.requires_grad = True
 
 
 
@@ -204,30 +203,36 @@ def train(args):
 
     args = add_arguments(args)
     model = SonnetGPT(args)
-
-    # LoRA 설정
     model.convert_to_lora()
-    layers_to_freeze = [6, 7, 8]
-    for i in layers_to_freeze:
-        attn = model.gpt.gpt_layers[i].self_attention
 
-        for lora_module in [attn.query, attn.key, attn.value]:
-            lora_module.A.requires_grad = False
-            lora_module.B.requires_grad = False
+    # 우선 모든 블럭을 freeze한다.
+    for param in model.gpt.parameters():
+      param.requires_grad = False # 모든 파라미터를 freeze하고, Lora Adapter만 학습 가능하게 할 것이다.
 
+    # Freeze 선택된 LoRA layer
+    if hasattr(args, "freeze_lora_layers"):
+        for i in args.freeze_lora_layers:
+            attn = model.gpt.gpt_layers[i].self_attention
+            for lora_module in [attn.query, attn.key, attn.value]:
+                lora_module.A.requires_grad = False
+                lora_module.B.requires_grad = False
+
+    # Transformer block unfreeze
+    if hasattr(args, "unfreeze_blocks"):
+        for i in args.unfreeze_blocks:
+            for param in model.gpt.gpt_layers[i].parameters():
+                param.requires_grad = True
 
 
     model = model.to(device)
-
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     optimizer = AdamW(trainable_params, lr=args.lr)
 
-    start_epoch = 0
-
     # ─────── 체크포인트 로딩 ───────
+    start_epoch = 0
     if os.path.isfile(args.filepath):
         try:
-            epoch_from_name = int(os.path.basename(args.filepath).split('-')[1])
+            epoch_from_name = int(os.path.basename(args.filepath).split('-')[0])
             print("▶ 체크포인트에서 epoch 추출됨:", epoch_from_name)
         except ValueError:
             epoch_from_name = 0
@@ -263,45 +268,13 @@ def train(args):
         b_mask = b_mask.to(device)
 
         # 손실, 그래디언트를 계산하고 모델 파라미터 업데이트.
-        # optimizer.zero_grad()
-        # logits = model(b_ids, b_mask)
-        # logits = logits[:, model.prompt_len:-1, :]  # prompt 이후의 예측 부분만 사용
-        # logits = rearrange(logits.contiguous(), 'b t d -> (b t) d')  # 시퀀스의 마지막 예측은 무시한다.
-        # labels = b_ids[:, 1:].contiguous().flatten()  # 레이블을 구성하기 위해 첫번째 토큰을 무시한다.
-        # loss = F.cross_entropy(logits, labels, reduction='mean', ignore_index=model.tokenizer.pad_token_id)
+        optimizer.zero_grad()
+        logits = model(b_ids, b_mask)
+        logits = logits[:, model.prompt_len:-1, :]  # prompt 이후의 예측 부분만 사용
+        logits = rearrange(logits.contiguous(), 'b t d -> (b t) d')  # 시퀀스의 마지막 예측은 무시한다.
+        labels = b_ids[:, 1:].contiguous().flatten()  # 레이블을 구성하기 위해 첫번째 토큰을 무시한다.
+        loss = F.cross_entropy(logits, labels, reduction='mean', ignore_index=model.tokenizer.pad_token_id)
 
-
-        # 기존 loss는 주석 처리하고, R-Drop Loss 도입
-        # 1. 두 번 forward
-        logits1 = model(b_ids, b_mask)
-        logits2 = model(b_ids, b_mask)
-
-        # 2. prompt 이후만 사용, reshape
-        logits1 = logits1[:, model.prompt_len:-1, :]
-        logits2 = logits2[:, model.prompt_len:-1, :]
-        logits1 = rearrange(logits1.contiguous(), 'b t d -> (b t) d')
-        logits2 = rearrange(logits2.contiguous(), 'b t d -> (b t) d')
-
-        labels = b_ids[:, 1:].contiguous().flatten()
-
-        # 3. CE loss 두 번 계산
-        ce1 = F.cross_entropy(logits1, labels, reduction='mean', ignore_index=model.tokenizer.pad_token_id)
-        ce2 = F.cross_entropy(logits2, labels, reduction='mean', ignore_index=model.tokenizer.pad_token_id)
-
-        # 4. KL Divergence 양방향
-        p1 = F.log_softmax(logits1, dim=-1)
-        p2 = F.log_softmax(logits2, dim=-1)
-        kl = (
-            F.kl_div(p1, p2.exp(), reduction='batchmean') +
-            F.kl_div(p2, p1.exp(), reduction='batchmean')
-        ) / 2
-
-        # 5. 최종 loss = (CE + KL)
-        loss = (ce1 + ce2) / 2 + 0.5 * kl  # λ = 0.5
-
-
-
-        # 그대로 ㄱㄱ
         loss.backward()
         optimizer.step()
 
@@ -343,8 +316,8 @@ def train(args):
 
 
       # TODO: 소넷의 작은 테이터셋에서 과적합을 방지하기 위한 종료 조건을 생각하시오.
-      if (epoch + 1) % 3 == 0:
-        args.filepath = os.path.join(drive_ckpt_dir, f'{version}-{epoch+1}-sonnet.pt')
+      if epoch == args.epochs - 1:
+        args.filepath = os.path.join(drive_ckpt_dir, f'{epoch+1}-sonnet.pt')
         save_model(model, optimizer, args, f'{args.filepath}')
 
 
@@ -385,11 +358,12 @@ def get_args():
   parser = argparse.ArgumentParser()
 
   parser.add_argument("--sonnet_path", type=str, default="data/sonnets.txt")
+  #parser.add_argument("--sonnet_path", type=str, default="data/Full_gpt4_distillation_sonnet_outputs.txt")
   parser.add_argument("--held_out_sonnet_path", type=str, default="data/sonnets_held_out.txt")
   parser.add_argument("--sonnet_out", type=str, default="predictions/generated_sonnets.txt")
 
   parser.add_argument("--seed", type=int, default=11711)
-  parser.add_argument("--epochs", type=int, default=51) # 훈련시킬 총 epoch 수
+  parser.add_argument("--epochs", type=int, default=400) # 훈련시킬 총 epoch 수
   parser.add_argument("--use_gpu", action='store_true', default=True)
 
   # Generation parameters.
@@ -397,10 +371,16 @@ def get_args():
   parser.add_argument("--top_p", type=float, help="Cumulative probability distribution for nucleus sampling.",
                       default=0.9)
 
-  parser.add_argument("--batch_size", help='The training batch size.', type=int, default=6)
+  parser.add_argument("--batch_size", help='The training batch size.', type=int, default=20)
   parser.add_argument("--lr", type=float, help="learning rate", default=1e-5)
   parser.add_argument("--model_size", type=str, help="The model size as specified on hugging face.",
                       choices=['gpt2', 'gpt2-medium', 'gpt2-large', 'gpt2-xl'], default='gpt2')
+
+
+  parser.add_argument("--freeze_lora_layers", type=int, nargs='*', default=None,
+                      help="LoRA 레이어 중 freeze할 레이어 인덱스 리스트 (예: --freeze_lora_layers 0 1 2)")
+  parser.add_argument("--unfreeze_blocks", type=int, nargs='*', default=None,
+                      help="Transformer 블럭 중 unfreeze할 인덱스 리스트 (예: --unfreeze_blocks 10 11)")
 
   #args = parser.parse_args()
   # ✅ Colab이 추가하는 -f 인자를 무시하게 함
@@ -426,16 +406,248 @@ def add_arguments(args):
   return args
 
 
+def train_conf(
+    args,
+    version,
+    start_epoch,
+    end_epoch,
+    freeze_lora_layers=None,
+    unfreeze_blocks=None,
+    dataset=None
+):
+    args.freeze_lora_layers = freeze_lora_layers or []
+    args.unfreeze_blocks = unfreeze_blocks or []
+    if dataset == "distilled":
+        args.sonnet_path = "data/Full_gpt4_distillation_sonnet_outputs.txt"
+        print('distilled')
+    elif dataset == "sonnet":
+        args.sonnet_path = "data/sonnets.txt"
+        print('sonnet')
+
+    else:
+        raise Exception(f'{dataset} is not supported.')
+    args.filepath = os.path.join(drive_ckpt_dir, f'{start_epoch}-sonnet.pt')
+    args.epochs = end_epoch
+    train(args)
+    #generate_submission_sonnets(args)
+
+
+
+
 if __name__ == "__main__":
+    args = get_args()
+    seed_everything(args.seed)  # 재현성을 위한 random seed 고정.
+    pipeline = [
+        {
+            "version": 0,
+            "start_epoch": 0,
+            "end_epoch": 30,
+            "freeze_lora_layers": [0,1,2,3,4,5,6,7,8,9],
+            "unfreeze_blocks": [10,11],
+            "dataset": "distilled"
+        },
+        {
+            "version": 1,
+            "start_epoch": 30,
+            "end_epoch": 60,
+            "freeze_lora_layers": [0,1,2,3,4,5],
+            "unfreeze_blocks": [8,9,10,11],
+            "dataset": "distilled"
+        },
+        {
+            "version": 2,
+            "start_epoch": 60,
+            "end_epoch": 140,
+            "freeze_lora_layers": [],
+            "unfreeze_blocks": [8,9,10,11],
+            "dataset": "distilled"
+        },
+        {
+            "version": 3,
+            "start_epoch": 200,
+            "end_epoch": 220,
+            "freeze_lora_layers": [],
+            "unfreeze_blocks": [6,7,8,9,10,11],
+            "dataset": "distilled"
+        },
+        {
+            "version": 4,
+            "start_epoch": 220,
+            "end_epoch": 280,
+            "freeze_lora_layers": [0,1,2,3,4,5,6,7,8,9],
+            "unfreeze_blocks": [10,11],
+            "dataset": "sonnet"
+        },
+        {
+            "version": 5,
+            "start_epoch": 280,
+            "end_epoch": 310,
+            "freeze_lora_layers": [0,1,2,3,4,5],
+            "unfreeze_blocks": [8,9,10,11],
+            "dataset": "sonnet"
+        },
+        {
+            "version": 6,
+            "start_epoch": 310,
+            "end_epoch": 390,
+            "freeze_lora_layers": [],
+            "unfreeze_blocks": [6,7,8,9,10,11],
+            "dataset": "distilled"
+        },
+        {
+            "version": 7,
+            "start_epoch": 390,
+            "end_epoch": 430,
+            "freeze_lora_layers": [],
+            "unfreeze_blocks": [6,7,8,9,10,11],
+            "dataset": "sonnet"
+        },
+        {
+            "version": 8,
+            "start_epoch": 430,
+            "end_epoch": 480,
+            "freeze_lora_layers": [],
+            "unfreeze_blocks": [0,1,2,3,4,5,6,7,8,9,10,11],
+            "dataset": "distilled"
+        },
+        {
+            "version": 9,
+            "start_epoch": 480,
+            "end_epoch": 530,
+            "freeze_lora_layers": [],
+            "unfreeze_blocks": [0,1,2,3,4,5,6,7,8,9,10,11],
+            "dataset": "sonnet"
+        },
 
-  total_epoch = 41
-  version = 3
-  '''
-  version_0: LoRA + Instruction
-  '''
 
-  args = get_args()
-  args.filepath = os.path.join(drive_ckpt_dir, f'{version}-{total_epoch}-sonnet.pt')
-  seed_everything(args.seed)  # 재현성을 위한 random seed 고정.
-  train(args)
-  #generate_submission_sonnets(args)
+    ]
+
+    for conf in pipeline:
+        ckpt_path = train_conf(args,**conf)
+        print(f"[✓] {conf['version']} 완료: {ckpt_path}")
+
+
+
+'''
+log
+{epoch: 0, train_loss: 5.812, val_loss: 6.107}
+{epoch: 6, train_loss: 4.548, val_loss: 5.605}
+{epoch: 11, train_loss: 4.204, val_loss: 5.754}
+{epoch: 16, train_loss: 4.040, val_loss: 5.893}
+{epoch: 21, train_loss: 3.929, val_loss: 5.978}
+{epoch: 26, train_loss: 3.844, val_loss: 6.033}
+
+{epoch: 31, train_loss: 3.765, val_loss: 6.043}
+{epoch: 36, train_loss: 3.611, val_loss: 6.020}
+{epoch: 41, train_loss: 3.526, val_loss: 6.033}
+{epoch: 46, train_loss: 3.454, val_loss: 6.075}
+{epoch: 51, train_loss: 3.391, val_loss: 6.113}
+{epoch: 56, train_loss: 3.337, val_loss: 6.131}
+
+{epoch: 61, train_loss: 3.283, val_loss: 6.162}
+{epoch: 66, train_loss: 3.244, val_loss: 6.193}
+{epoch: 71, train_loss: 3.202, val_loss: 6.239}
+{epoch: 76, train_loss: 3.165, val_loss: 6.273}
+{epoch: 81, train_loss: 3.129, val_loss: 6.295}
+{epoch: 86, train_loss: 3.093, val_loss: 6.326}
+{epoch: 91, train_loss: 3.069, val_loss: 6.342}
+{epoch: 96, train_loss: 3.036, val_loss: 6.364}
+{epoch: 101, train_loss: 3.008, val_loss: 6.405}
+{epoch: 106, train_loss: 2.986, val_loss: 6.435}
+{epoch: 111, train_loss: 2.959, val_loss: 6.456}
+{epoch: 116, train_loss: 2.934, val_loss: 6.467}
+{epoch: 121, train_loss: 2.914, val_loss: 6.499}
+{epoch: 126, train_loss: 2.896, val_loss: 6.502}
+{epoch: 131, train_loss: 2.877, val_loss: 6.508}
+{epoch: 136, train_loss: 2.848, val_loss: 6.571}
+
+{epoch: 141, train_loss: 2.811, val_loss: 6.554}
+{epoch: 146, train_loss: 2.738, val_loss: 6.542}
+{epoch: 151, train_loss: 2.695, val_loss: 6.576}
+{epoch: 156, train_loss: 2.662, val_loss: 6.601}
+{epoch: 161, train_loss: 2.628, val_loss: 6.612}
+{epoch: 166, train_loss: 2.594, val_loss: 6.635}
+{epoch: 171, train_loss: 2.569, val_loss: 6.668}
+{epoch: 176, train_loss: 2.544, val_loss: 6.679}
+{epoch: 181, train_loss: 2.517, val_loss: 6.681}
+{epoch: 186, train_loss: 2.487, val_loss: 6.762}
+{epoch: 191, train_loss: 2.469, val_loss: 6.742}
+{epoch: 196, train_loss: 2.445, val_loss: 6.755}
+{epoch: 201, train_loss: 2.416, val_loss: 6.832}
+{epoch: 206, train_loss: 2.389, val_loss: 6.851}
+{epoch: 211, train_loss: 2.368, val_loss: 6.909}
+{epoch: 216, train_loss: 2.349, val_loss: 6.915}
+
+{epoch: 221, train_loss: 7.015, val_loss: 6.553}
+{epoch: 226, train_loss: 5.649, val_loss: 5.438}
+{epoch: 231, train_loss: 5.316, val_loss: 5.093}
+{epoch: 236, train_loss: 5.188, val_loss: 4.937}
+{epoch: 241, train_loss: 5.111, val_loss: 4.848}
+{epoch: 246, train_loss: 5.052, val_loss: 4.791}
+{epoch: 251, train_loss: 5.005, val_loss: 4.753}
+{epoch: 256, train_loss: 4.959, val_loss: 4.725}
+{epoch: 261, train_loss: 4.938, val_loss: 4.704}
+{epoch: 266, train_loss: 4.912, val_loss: 4.687}
+{epoch: 271, train_loss: 4.889, val_loss: 4.675}
+{epoch: 276, train_loss: 4.859, val_loss: 4.664}
+{epoch: 281, train_loss: 4.848, val_loss: 4.645}
+{epoch: 286, train_loss: 4.746, val_loss: 4.606}
+{epoch: 291, train_loss: 4.709, val_loss: 4.584}
+{epoch: 296, train_loss: 4.682, val_loss: 4.572}
+{epoch: 301, train_loss: 4.632, val_loss: 4.564}
+{epoch: 306, train_loss: 4.590, val_loss: 4.558}
+
+
+{epoch: 310, train_loss: 2.797, val_loss: 5.299}
+{epoch: 315, train_loss: 2.346, val_loss: 6.177}
+{epoch: 320, train_loss: 2.313, val_loss: 6.343}
+{epoch: 325, train_loss: 2.294, val_loss: 6.429}
+{epoch: 330, train_loss: 2.271, val_loss: 6.514}
+{epoch: 335, train_loss: 2.252, val_loss: 6.578}
+{epoch: 340, train_loss: 2.235, val_loss: 6.629}
+{epoch: 345, train_loss: 2.218, val_loss: 6.662}
+{epoch: 350, train_loss: 2.199, val_loss: 6.714}
+{epoch: 355, train_loss: 2.180, val_loss: 6.770}
+{epoch: 360, train_loss: 2.163, val_loss: 6.808}
+{epoch: 365, train_loss: 2.143, val_loss: 6.870}
+{epoch: 370, train_loss: 2.131, val_loss: 6.890}
+{epoch: 375, train_loss: 2.116, val_loss: 6.928}
+{epoch: 380, train_loss: 2.094, val_loss: 6.944}
+{epoch: 385, train_loss: 2.079, val_loss: 7.007}
+
+{epoch: 390, train_loss: 5.976, val_loss: 5.272}
+{epoch: 395, train_loss: 4.726, val_loss: 4.627}
+{epoch: 400, train_loss: 4.624, val_loss: 4.576}
+{epoch: 405, train_loss: 4.581, val_loss: 4.553}
+{epoch: 410, train_loss: 4.542, val_loss: 4.538}
+{epoch: 415, train_loss: 4.505, val_loss: 4.525}
+{epoch: 420, train_loss: 4.467, val_loss: 4.519}
+{epoch: 425, train_loss: 4.422, val_loss: 4.517}
+{epoch: 430, train_loss: 2.270, val_loss: 5.445}
+{epoch: 435, train_loss: 1.882, val_loss: 6.202}
+{epoch: 440, train_loss: 1.826, val_loss: 6.448}
+{epoch: 445, train_loss: 1.782, val_loss: 6.610}
+{epoch: 450, train_loss: 1.740, val_loss: 6.721}
+{epoch: 455, train_loss: 1.699, val_loss: 6.788}
+{epoch: 460, train_loss: 1.661, val_loss: 6.913}
+{epoch: 465, train_loss: 1.621, val_loss: 7.031}
+{epoch: 470, train_loss: 1.584, val_loss: 7.164}
+{epoch: 475, train_loss: 1.543, val_loss: 7.256}
+{epoch: 480, train_loss: 5.340, val_loss: 4.990}
+{epoch: 485, train_loss: 4.240, val_loss: 4.482}
+{epoch: 490, train_loss: 4.123, val_loss: 4.461}
+{epoch: 495, train_loss: 4.026, val_loss: 4.452}
+{epoch: 500, train_loss: 3.956, val_loss: 4.453}
+{epoch: 505, train_loss: 3.863, val_loss: 4.466}
+{epoch: 510, train_loss: 3.796, val_loss: 4.481}
+{epoch: 515, train_loss: 3.723, val_loss: 4.507}
+{epoch: 520, train_loss: 3.631, val_loss: 4.534}
+{epoch: 525, train_loss: 3.548, val_loss: 4.566}
+
+
+최고기록:
+Epoch 498: train loss :: 3.981.
+Generating several output sonnets...
+Epoch 498: validation loss :: 4.448.
+
+'''
