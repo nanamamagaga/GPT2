@@ -12,6 +12,7 @@ https://colab.research.google.com/drive/1ZTxD1iYyzfQuDOC7B-nspRLKxk_EyWGn?usp=sh
 용량이 커서 google drive에 올렸습니다.<br>
 https://drive.google.com/drive/folders/1oTZqrA6zD7hf_rNompSz5Rwkp1AQmrOc?usp=sharing
 
+<br>
 2. sonnet_generation
 
 - Colab에서 실행
