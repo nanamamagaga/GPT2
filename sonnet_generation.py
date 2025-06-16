@@ -17,6 +17,7 @@ from datasets import (
 from models.gpt2 import GPT2Model
 from optimizer import AdamW
 import LoRA_adapter
+from evaluation import test_sonnet
 
 TQDM_DISABLE = False
 
@@ -43,6 +44,8 @@ class SonnetGPT(nn.Module):
     self.tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     self.tokenizer.pad_token = self.tokenizer.eos_token  # eos_token = "End Of Sequence" 토큰, print(tokenizer.eos_token) -> # </s>
 
+
+# train() 함수에서 Transformer block의 freeze를 결정할 것이다.
     # # 기본적으로, 전체 모델을 fine-tuning한다. TODO: 이것은 좋은 생각이 아닌 것 같다.
     # for param in self.gpt.parameters():
     #   param.requires_grad = False # 모든 파라미터를 freeze하고, Lora Adapter만 학습 가능하게 할 것이다.
@@ -272,41 +275,17 @@ def train(args):
 
       train_loss = train_loss / num_batches
       print(f"Epoch {epoch}: train loss :: {train_loss :.3f}.")
-      print('Generating several output sonnets...')
-      model.eval()
-
-
-      # for batch in held_out_sonnet_dataset:
-      #   encoding = model.tokenizer(batch[1], return_tensors='pt', padding=True, truncation=True).to(device)
-      #   output = model.generate(encoding['input_ids'], temperature=args.temperature, top_p=args.top_p)
-      #   print(f'{batch[1]}{output[1]}\n\n')
-
-
-      # validation dataset에 대해 output 출력 대신, loss만 구하
-      # === Validation loss 계산 ===
-      model.eval()
-      val_loss = 0
-      val_batches = 0
-      with torch.no_grad():
-          for batch in held_out_sonnet_dataset:
-              encoding = model.tokenizer(batch[1], return_tensors='pt', padding=True, truncation=True).to(device)
-              input_ids = encoding['input_ids']
-              attention_mask = encoding['attention_mask']
-              logits = model(input_ids, attention_mask)
-              logits = logits[:, model.prompt_len:-1, :]
-              logits = rearrange(logits.contiguous(), 'b t d -> (b t) d')
-              labels = input_ids[:, 1:].contiguous().flatten()
-              loss = F.cross_entropy(logits, labels, reduction='mean', ignore_index=model.tokenizer.pad_token_id)
-              val_loss += loss.item()
-              val_batches += 1
-
-      val_loss /= val_batches
-      print(f"Epoch {epoch}: validation loss :: {val_loss :.3f}.")
-
-
-      # TODO: 소넷의 작은 테이터셋에서 과적합을 방지하기 위한 종료 조건을 생각하시오.
+      
+      if epoch % 10 == 0:
+        print('Generating several output sonnets...')
+        model.eval()
+        for batch in held_out_sonnet_dataset:
+          encoding = model.tokenizer(batch[1], return_tensors='pt', padding=True, truncation=True).to(device)
+          output = model.generate(encoding['input_ids'], temperature=args.temperature, top_p=args.top_p)
+          print(f'{batch[1]}{output[1]}\n\n')
+          
       if epoch == args.epochs - 1:
-        args.filepath = os.path.join(drive_ckpt_dir, f'{epoch+1}-sonnet.pt')
+        args.filepath = f'{epoch+1}-sonnet.pt'
         save_model(model, optimizer, args, f'{args.filepath}')
 
 
@@ -317,7 +296,7 @@ def generate_submission_sonnets(args):
 
   model = SonnetGPT(saved['args'])
   model.load_state_dict(saved['model'])
-  model.convert_to_lora(l=6)
+  model.convert_to_lora()
   model = model.to(device)
   model.eval()
 
@@ -341,6 +320,10 @@ def generate_submission_sonnets(args):
     for sonnet in generated_sonnets:
       f.write(f"\n{sonnet[0]}\n")
       f.write(sonnet[1])
+  
+  test_score = test_sonnet(args.sonnet_out, args.held_out_sonnet_path)
+  print("\ntest_score: {}".format(test_score))
+  
 
 
 def get_args():
@@ -352,7 +335,7 @@ def get_args():
   parser.add_argument("--sonnet_out", type=str, default="predictions/generated_sonnets.txt")
 
   parser.add_argument("--seed", type=int, default=11711)
-  parser.add_argument("--epochs", type=int, default=400) # 훈련시킬 총 epoch 수
+  parser.add_argument("--epochs", type=int, default=400)
   parser.add_argument("--use_gpu", action='store_true', default=True)
 
   # Generation parameters.
@@ -366,14 +349,13 @@ def get_args():
                       choices=['gpt2', 'gpt2-medium', 'gpt2-large', 'gpt2-xl'], default='gpt2')
 
 
+  # 새로 추가한 argparse 옵션
   parser.add_argument("--freeze_lora_layers", type=int, nargs='*', default=None,
                       help="LoRA 레이어 중 freeze할 레이어 인덱스 리스트 (예: --freeze_lora_layers 0 1 2)")
   parser.add_argument("--unfreeze_blocks", type=int, nargs='*', default=None,
                       help="Transformer 블럭 중 unfreeze할 인덱스 리스트 (예: --unfreeze_blocks 10 11)")
 
-  #args = parser.parse_args()
-  # ✅ Colab이 추가하는 -f 인자를 무시하게 함
-  args, _ = parser.parse_known_args()
+  args = parser.parse_args()
   return args
 
 def add_arguments(args):
@@ -415,10 +397,10 @@ def train_conf(
 
     else:
         raise Exception(f'{dataset} is not supported.')
-    args.filepath = os.path.join(drive_ckpt_dir, f'{start_epoch}-sonnet.pt')
+    args.filepath = f'{start_epoch}-sonnet.pt'
     args.epochs = end_epoch
     train(args)
-    #generate_submission_sonnets(args)
+    generate_submission_sonnets(args)
 
 
 
@@ -514,7 +496,6 @@ if __name__ == "__main__":
     for conf in pipeline:
         ckpt_path = train_conf(args,**conf)
         print(f"[✓] {conf['version']} 완료: {ckpt_path}")
-
 
 
 '''
