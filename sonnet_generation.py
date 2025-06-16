@@ -283,6 +283,8 @@ def train(args):
           encoding = model.tokenizer(batch[1], return_tensors='pt', padding=True, truncation=True).to(device)
           output = model.generate(encoding['input_ids'], temperature=args.temperature, top_p=args.top_p)
           print(f'{batch[1]}{output[1]}\n\n')
+          generate_submission_sonnets(args)
+          
           
       if epoch == args.epochs - 1:
         args.filepath = f'{epoch+1}-sonnet.pt'
@@ -484,7 +486,7 @@ if __name__ == "__main__":
         {
             "version": 9,
             "start_epoch": 480,
-            "end_epoch": 530,
+            "end_epoch": 500,
             "freeze_lora_layers": [],
             "unfreeze_blocks": [0,1,2,3,4,5,6,7,8,9,10,11],
             "dataset": "sonnet"
