@@ -276,14 +276,6 @@ def train(args):
       train_loss = train_loss / num_batches
       print(f"Epoch {epoch}: train loss :: {train_loss :.3f}.")
           
-      if epoch % 10 == 0:
-        print('Generating several output sonnets...')
-        model.eval()
-        for batch in held_out_sonnet_dataset:
-            encoding = model.tokenizer(batch[1], return_tensors='pt', padding=True, truncation=True).to(device)
-            output = model.generate(encoding['input_ids'], temperature=args.temperature, top_p=args.top_p)
-            print(f'{batch[1]}{output[1]}\n\n')
-
     # 마지막 epoch일 때만 모델 저장 및 정식 제출 파일 생성
     if epoch == args.epochs - 1:
         print('Generating several output sonnets...')
