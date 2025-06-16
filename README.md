@@ -1,5 +1,8 @@
-추가한 module: GPT2/distillation_data_generation.py, GPT2/LoRA_adapter.py<br>
-추가한 dataset: GPT2/data/Full_gpt4_distillation_sonnet_outputs.txt, GPT2/data/gpt4_2line_sonnet.jsonl
+Add new GPT2 distillation & LoRA modules and dataset files
+- GPT2/LoRA_adapter.py
+- GPT2/distillation_data_generation.py
+- GPT2/data/Full_gpt4_distillation_sonnet_outputs.txt
+- GPT2/data/gpt4_2line_sonnet.jsonl
 
 실행
 1. paraphrase_detection
