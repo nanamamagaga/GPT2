@@ -1,0 +1,25 @@
+1) GPT-2 논문
+제목: Language Models are Unsupervised Multitask Learners
+저자: Radford et al., 2019 (OpenAI)
+사전학습만으로 다양한 태스크를 zero-shot으로 수행하는 언어모델 제안.
+
+2) FLAN (Fine-tuned LAnguage Net)
+제목: Finetuned Language Models Are Zero-Shot Learners
+저자: Wei, J., Bosma, M., Zhao, V. Y., et al. (2021)
+입력에 자연어 명령어 (instruction) 를 추가하여 zero-shot 성능 향상을 달성한 대표 연구.
+
+3) Quora Question Pairs (QQP)
+제목: Detecting Duplicate Questions with Deep Learning
+저자: Quora AI Team (공식 논문 없음, Quora가 자체 Kaggle을 통해 공개)
+문장쌍이 의미상 중복되는지를 분류하는 대표적인 paraphrase detection 데이터셋
+
+4) LoRA
+제목: LoRA: Low-Rank Adaptation of Large Language Models
+저자: Edward J. Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Weizhu Chen
+점진적인 학습 전략을 구현하고, LoRA과 원래 Transformer 블럭을 함께 unfreeze하며 모델의 표현력을 극대화하였다.
+
+5) Distillation
+제목: Distilling the Knowledge in a Neural Network
+저자: Geoffrey Hinton, Oriol Vinyals, Jeff Dean
+고성능 모델(GPT-4.1)로부터 생성된 데이터를 기반으로 SonnetGPT를 학습했다.
+
